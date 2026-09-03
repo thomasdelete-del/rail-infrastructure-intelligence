@@ -1,0 +1,20 @@
+FRIEDBERG_GEOMETRY = {
+    "station_id": "DE-FRI-HESS-1930",
+    "crs": "EPSG:4326",
+    "features": [],
+    "status": "awaiting_authoritative_import",
+    "policy": "No coordinates are guessed. Geometry enters the twin only with source feature ID, original CRS, source URL and retrieval date.",
+    "planned_layers": [
+        "operating_point",
+        "route_network",
+        "tracks",
+        "platforms",
+        "platform_roofs",
+        "accesses",
+        "underpasses",
+        "bridges",
+        "overhead_line",
+        "parcels",
+        "terrain",
+    ],
+}
