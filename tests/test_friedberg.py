@@ -14,6 +14,12 @@ def test_rejects_other_friedbergs():
     assert not is_friedberg_hess("Friedberg Süd")
 
 
+def test_complete_platform_edge_inventory():
+    tracks = {edge["track"] for edge in FRIEDBERG["platform_edges"]}
+    assert tracks == {"1", "1a", "2", "4", "5", "7", "8", "10", "11", "12"}
+    assert len(FRIEDBERG["platform_edges"]) == 10
+
+
 def test_all_platform_observations_have_sources():
     for edge in FRIEDBERG["platform_edges"]:
         for observation in edge["observations"]:
