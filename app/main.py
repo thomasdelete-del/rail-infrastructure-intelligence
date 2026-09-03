@@ -2,20 +2,21 @@ from datetime import date
 
 from fastapi import FastAPI, Query
 
+from app.collectors.openstation import OpenStationCollector
 from app.seed.friedberg import FRIEDBERG
 from app.seed.friedberg_geometry import FRIEDBERG_GEOMETRY
 from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SOURCES
 from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBERG_SERVICE_TRACK_CONFLICTS, SOURCE_2026 as SERVICE_TRACK_SOURCE
+from app.services.change_report import build_change_report
 
-app = FastAPI(title="Rail Infrastructure Intelligence", version="0.4.0", description="Source-aware digital infrastructure twin for railway stations.")
+app = FastAPI(title="Rail Infrastructure Intelligence", version="0.5.0", description="Source-aware digital infrastructure twin for railway stations.")
 
 @app.get("/")
 def root():
-    return {"service": "rail-infrastructure-intelligence", "version": "0.4.0", "pilot": "Friedberg (Hess)", "docs": "/docs"}
+    return {"service": "rail-infrastructure-intelligence", "version": "0.5.0", "pilot": "Friedberg (Hess)", "docs": "/docs"}
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+def health(): return {"status": "ok"}
 
 @app.get("/stations/friedberg-hess")
 def friedberg():
@@ -24,39 +25,31 @@ def friedberg():
     return result
 
 @app.get("/stations/friedberg-hess/platforms")
-def platforms():
-    return {"station": FRIEDBERG["name"], "platform_edges": FRIEDBERG["platform_edges"]}
+def platforms(): return {"station": FRIEDBERG["name"], "platform_edges": FRIEDBERG["platform_edges"]}
 
 @app.get("/stations/friedberg-hess/service-tracks")
-def service_tracks():
-    return {"station": FRIEDBERG["name"], "service_tracks": FRIEDBERG_SERVICE_TRACKS}
+def service_tracks(): return {"station": FRIEDBERG["name"], "service_tracks": FRIEDBERG_SERVICE_TRACKS}
 
 @app.get("/stations/friedberg-hess/projects")
-def projects():
-    return {"station": FRIEDBERG["name"], "projects": FRIEDBERG_PROJECTS}
+def projects(): return {"station": FRIEDBERG["name"], "projects": FRIEDBERG_PROJECTS}
 
 @app.get("/stations/friedberg-hess/sources")
-def sources():
-    return {"station": FRIEDBERG["name"], "sources": FRIEDBERG["sources"] + FRIEDBERG_PROJECT_SOURCES + [SERVICE_TRACK_SOURCE]}
+def sources(): return {"station": FRIEDBERG["name"], "sources": FRIEDBERG["sources"] + FRIEDBERG_PROJECT_SOURCES + [SERVICE_TRACK_SOURCE]}
 
 @app.get("/stations/friedberg-hess/conflicts")
-def conflicts():
-    return {"station": FRIEDBERG["name"], "conflicts": FRIEDBERG_SERVICE_TRACK_CONFLICTS}
+def conflicts(): return {"station": FRIEDBERG["name"], "conflicts": FRIEDBERG_SERVICE_TRACK_CONFLICTS}
 
 @app.get("/stations/friedberg-hess/geometry")
-def geometry():
-    return FRIEDBERG_GEOMETRY
+def geometry(): return FRIEDBERG_GEOMETRY
 
 @app.get("/stations/friedberg-hess/state")
 def state(at: date = Query(default_factory=date.today)):
-    return {
-        "station": FRIEDBERG["name"],
-        "requested_date": at.isoformat(),
-        "note": "Temporal endpoint is active. Object-level validity filtering expands as dated observations are imported.",
-        "existing": FRIEDBERG,
-        "projects": FRIEDBERG_PROJECTS,
-    }
+    return {"station": FRIEDBERG["name"], "requested_date": at.isoformat(), "existing": FRIEDBERG, "projects": FRIEDBERG_PROJECTS}
+
+@app.get("/stations/friedberg-hess/change-report/openstation")
+async def openstation_change_report():
+    # Stored OpenStation observations will come from PostgreSQL in the next persistence step.
+    return await build_change_report(OpenStationCollector(), FRIEDBERG["name"], stored=[])
 
 @app.get("/stations/friedberg-hess/data-gaps")
-def data_gaps():
-    return {"station": FRIEDBERG["name"], "data_gaps": FRIEDBERG["data_gaps"]}
+def data_gaps(): return {"station": FRIEDBERG["name"], "data_gaps": FRIEDBERG["data_gaps"]}
