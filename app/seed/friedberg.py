@@ -8,18 +8,16 @@ SOURCE = {
 }
 
 
-def edge(track, height_mm, length_m, accessible, tactile):
-    return {
-        "object_id": f"FRI-PE-{track.upper().replace(' ', '-')}",
-        "object_type": "platform_edge",
-        "track": track,
-        "observations": [
-            {"attribute": "platform_height", "value": height_mm, "unit": "mm", "source_id": SOURCE["id"]},
-            {"attribute": "net_construction_length", "value": length_m, "unit": "m", "source_id": SOURCE["id"], "note": "DB warns this value is not suitable as train usable length."},
-            {"attribute": "step_free", "value": accessible, "unit": None, "source_id": SOURCE["id"]},
-            {"attribute": "tactile_strip", "value": tactile, "unit": None, "source_id": SOURCE["id"]},
-        ],
-    }
+def edge(track, height_mm, length_m, accessible, tactile, access_method=None):
+    observations = [
+        {"attribute": "platform_height", "value": height_mm, "unit": "mm", "source_id": SOURCE["id"]},
+        {"attribute": "net_construction_length", "value": length_m, "unit": "m", "source_id": SOURCE["id"], "note": "DB warns this value is not suitable as train usable length."},
+        {"attribute": "step_free", "value": accessible, "unit": None, "source_id": SOURCE["id"]},
+        {"attribute": "tactile_strip", "value": tactile, "unit": None, "source_id": SOURCE["id"]},
+    ]
+    if access_method:
+        observations.append({"attribute": "step_free_access_method", "value": access_method, "unit": None, "source_id": SOURCE["id"]})
+    return {"object_id": f"FRI-PE-{track.upper().replace(' ', '-')}", "object_type": "platform_edge", "track": track, "observations": observations}
 
 
 FRIEDBERG = {
@@ -31,6 +29,8 @@ FRIEDBERG = {
     "data_state": "2026-08-17",
     "sources": [SOURCE],
     "platform_edges": [
+        edge("1", 760, 280, True, True, "level_access"),
+        edge("2", 760, 354, False, True),
         edge("4", 760, 354, False, True),
         edge("5", 760, 276, False, False),
         edge("7", 760, 280, False, False),
@@ -38,15 +38,12 @@ FRIEDBERG = {
         edge("10", 550, 265, False, True),
         edge("11", 380, 184, False, False),
         edge("12", 380, 184, False, False),
-        edge("1a", 760, 137, True, True),
+        edge("1a", 760, 137, True, True, "level_access"),
     ],
-    "projects": [],
-    "geometries": [],
-    "conflicts": [],
+    "projects": [], "geometries": [], "conflicts": [],
     "data_gaps": [
         "Authoritative usable platform lengths for train-length planning",
-        "Platform and roof geometries",
-        "Current detailed track topology",
+        "Platform and roof geometries", "Current detailed track topology",
         "Elevator/stair/underpass object inventory and geometry",
         "Current and planned overhead-line geometry",
         "Current plan-approval documents and object-level target state",
