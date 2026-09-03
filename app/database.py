@@ -2,7 +2,19 @@ import os
 
 from sqlalchemy import create_engine, text
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+
+def normalize_database_url(url: str | None) -> str | None:
+    """Use the installed psycopg 3 driver for generic PostgreSQL URLs."""
+    if not url:
+        return url
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://"):]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://"):]
+    return url
+
+
+DATABASE_URL = normalize_database_url(os.getenv("DATABASE_URL"))
 _engine = None
 
 
