@@ -1,0 +1,24 @@
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: railinfra
+      POSTGRES_USER: railinfra
+      POSTGRES_PASSWORD: railinfra
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+
+  api:
+    build: .
+    environment:
+      DATABASE_URL: postgresql+psycopg://railinfra:railinfra@db:5432/railinfra
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
