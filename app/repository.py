@@ -62,3 +62,51 @@ def store_observations(items: list[dict[str, Any]]) -> int:
                 "provenance": json.dumps(item.get("metadata", {})),
             })
     return len(items)
+
+
+def build_infrastructure_inventory(rows: list[dict[str, Any]], station: str) -> dict[str, Any]:
+    objects: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        item = objects.setdefault(row["object_key"], {
+            "object_key": row["object_key"],
+            "object_type": row["object_type"],
+            "parent_object_key": row.get("parent_object_key"),
+            "depth": row["depth"],
+            "observations": [],
+        })
+        if row.get("attribute") is not None:
+            item["observations"].append({
+                "attribute": row["attribute"], "value": row["value"], "unit": row.get("unit"),
+                "source_key": row["source_key"], "observed_at": row.get("observed_at"),
+                "provenance": row.get("provenance") or {},
+            })
+    ordered = sorted(objects.values(), key=lambda item: (item["depth"], item["object_type"], item["object_key"]))
+    return {"station": station, "object_count": len(ordered), "objects": ordered}
+
+
+def load_infrastructure_inventory(root_object_key: str, station: str) -> dict[str, Any]:
+    sql = text('''
+        WITH RECURSIVE tree AS (
+            SELECT io.id, io.object_key, io.object_type, NULL::text AS parent_object_key, 0 AS depth
+            FROM infrastructure_object io
+            WHERE io.object_key = :root_key
+          UNION ALL
+            SELECT child.id, child.object_key, child.object_type, parent.object_key, tree.depth + 1
+            FROM tree
+            JOIN object_relation relation ON relation.object_id = tree.id AND relation.predicate = 'part_of'
+            JOIN infrastructure_object child ON child.id = relation.subject_id
+            JOIN infrastructure_object parent ON parent.id = relation.object_id
+            WHERE tree.depth < 5
+        )
+        SELECT DISTINCT tree.object_key, tree.object_type, tree.parent_object_key, tree.depth,
+               observation.attribute, observation.value_json AS value, observation.unit,
+               source.source_key, observation.observed_at, observation.provenance,
+               observation.id AS observation_id
+        FROM tree
+        LEFT JOIN observation ON observation.object_id = tree.id
+        LEFT JOIN source ON source.id = observation.source_id
+        ORDER BY tree.depth, tree.object_type, tree.object_key, observation.observed_at, observation_id
+    ''')
+    with get_engine().connect() as connection:
+        rows = [dict(row) for row in connection.execute(sql, {"root_key": root_object_key}).mappings()]
+    return build_infrastructure_inventory(rows, station)

@@ -54,6 +54,25 @@ CREATE TABLE IF NOT EXISTS object_relation (
     UNIQUE(subject_id, predicate, object_id, valid_from)
 );
 
+-- Backfill the hierarchy encoded by source-level NeTEx identifiers. This is
+-- deliberately append-only and source-specific; no existing relation wins.
+INSERT INTO object_relation (subject_id, predicate, object_id, source_id)
+SELECT DISTINCT child_object.id, 'part_of', parent_object.id, child_observation.source_id
+FROM observation child_observation
+JOIN infrastructure_object child_object ON child_object.id = child_observation.object_id
+JOIN observation parent_observation
+  ON parent_observation.source_id = child_observation.source_id
+ AND parent_observation.provenance->>'netex_id' = child_observation.provenance->>'parent_netex_id'
+JOIN infrastructure_object parent_object ON parent_object.id = parent_observation.object_id
+WHERE child_observation.provenance->>'parent_netex_id' IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM object_relation existing
+      WHERE existing.subject_id = child_object.id
+        AND existing.predicate = 'part_of'
+        AND existing.object_id = parent_object.id
+        AND existing.source_id = child_observation.source_id
+  );
+
 CREATE TABLE IF NOT EXISTS project (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_key TEXT UNIQUE NOT NULL,
