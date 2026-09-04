@@ -8,14 +8,16 @@ from app.services.compare import compare_observations
 async def build_change_report(collector: Collector, station: str, persist: bool = False) -> dict:
     collected = await collector.collect(station)
     incoming = [asdict(item) for item in collected]
-    stored = load_observations(collector.source_key)
+    # Object keys are global. Include other sources so conflicting evidence is
+    # surfaced and retained instead of silently isolated by collector.
+    stored = load_observations()
     comparison = compare_observations(stored, incoming)
 
     to_store = list(comparison["new"])
     to_store.extend(item["incoming"] for item in comparison["changed"])
     # Conflicts are evidence too: retain them instead of selecting a winner.
     to_store.extend(item["incoming"] for item in comparison["conflicts"])
-    stored_count = store_observations(to_store) if persist else 0
+    stored_count = store_observations(to_store) if persist and to_store else 0
 
     return {
         "station": station,

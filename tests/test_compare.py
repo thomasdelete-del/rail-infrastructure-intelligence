@@ -24,3 +24,14 @@ def test_conflicting_value_from_different_source():
     result = compare_observations([obs(550, "source-a")], [obs(760, "source-b")])
     assert len(result["conflicts"]) == 1
     assert result["conflicts"][0]["existing"][0]["value"] == 550
+
+
+def test_same_value_from_new_source_is_stored_as_new_provenance():
+    result = compare_observations([obs(760, "source-a")], [obs(760, "source-b")])
+    assert result["new"] == [obs(760, "source-b")]
+
+
+def test_return_to_historical_value_is_a_change_against_latest_value():
+    stored = [obs(550), obs(760)]
+    result = compare_observations(stored, [obs(550)])
+    assert len(result["changed"]) == 1

@@ -37,8 +37,11 @@ CREATE TABLE IF NOT EXISTS observation (
     method TEXT DEFAULT 'source',
     is_derived BOOLEAN NOT NULL DEFAULT FALSE,
     confidence NUMERIC(4,3) CHECK (confidence >= 0 AND confidence <= 1),
-    note TEXT
+    note TEXT,
+    provenance JSONB NOT NULL DEFAULT '{}'::jsonb
 );
+
+ALTER TABLE observation ADD COLUMN IF NOT EXISTS provenance JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS object_relation (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

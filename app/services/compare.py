@@ -18,11 +18,19 @@ def compare_observations(stored: list[dict[str, Any]], incoming: list[dict[str, 
         if not existing:
             result["new"].append(item)
             continue
-        matches = [old for old in existing if old.get("value") == item.get("value") and old.get("unit") == item.get("unit")]
-        if matches:
-            result["unchanged"].append({"incoming": item, "matches": matches})
+        same_source = [old for old in existing if old.get("source_key") == item.get("source_key")]
+        if not same_source:
+            matches = [old for old in existing if old.get("value") == item.get("value") and old.get("unit") == item.get("unit")]
+            if matches:
+                # The value is corroborated, but this source's provenance is new.
+                result["new"].append(item)
+            else:
+                result["conflicts"].append({"incoming": item, "existing": existing})
             continue
-        same_source = any(old.get("source_key") == item.get("source_key") for old in existing)
+        latest = same_source[-1]
+        if latest.get("value") == item.get("value") and latest.get("unit") == item.get("unit"):
+            result["unchanged"].append({"incoming": item, "matches": [latest]})
+            continue
         record = {"incoming": item, "existing": existing}
-        result["changed" if same_source else "conflicts"].append(record)
+        result["changed"].append(record)
     return result
