@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS postgis;
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE TABLE source (
+CREATE TABLE IF NOT EXISTS source (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     source_key TEXT UNIQUE NOT NULL,
     publisher TEXT NOT NULL,
@@ -14,7 +14,7 @@ CREATE TABLE source (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE infrastructure_object (
+CREATE TABLE IF NOT EXISTS infrastructure_object (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     object_key TEXT UNIQUE NOT NULL,
     object_type TEXT NOT NULL,
@@ -24,7 +24,7 @@ CREATE TABLE infrastructure_object (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE observation (
+CREATE TABLE IF NOT EXISTS observation (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     object_id UUID NOT NULL REFERENCES infrastructure_object(id) ON DELETE CASCADE,
     attribute TEXT NOT NULL,
@@ -40,7 +40,7 @@ CREATE TABLE observation (
     note TEXT
 );
 
-CREATE TABLE object_relation (
+CREATE TABLE IF NOT EXISTS object_relation (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     subject_id UUID NOT NULL REFERENCES infrastructure_object(id) ON DELETE CASCADE,
     predicate TEXT NOT NULL,
@@ -51,7 +51,7 @@ CREATE TABLE object_relation (
     UNIQUE(subject_id, predicate, object_id, valid_from)
 );
 
-CREATE TABLE project (
+CREATE TABLE IF NOT EXISTS project (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_key TEXT UNIQUE NOT NULL,
     name TEXT NOT NULL,
@@ -61,14 +61,14 @@ CREATE TABLE project (
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
-CREATE TABLE project_object (
+CREATE TABLE IF NOT EXISTS project_object (
     project_id UUID REFERENCES project(id) ON DELETE CASCADE,
     object_id UUID REFERENCES infrastructure_object(id) ON DELETE CASCADE,
     role TEXT,
     PRIMARY KEY (project_id, object_id)
 );
 
-CREATE TABLE conflict (
+CREATE TABLE IF NOT EXISTS conflict (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     object_id UUID REFERENCES infrastructure_object(id) ON DELETE CASCADE,
     attribute TEXT NOT NULL,
@@ -77,7 +77,7 @@ CREATE TABLE conflict (
     resolution_note TEXT
 );
 
-CREATE TABLE data_gap (
+CREATE TABLE IF NOT EXISTS data_gap (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     object_id UUID REFERENCES infrastructure_object(id) ON DELETE CASCADE,
     topic TEXT NOT NULL,
@@ -86,6 +86,6 @@ CREATE TABLE data_gap (
     note TEXT
 );
 
-CREATE INDEX idx_object_geometry ON infrastructure_object USING GIST (geometry);
-CREATE INDEX idx_observation_object_attribute ON observation(object_id, attribute);
-CREATE INDEX idx_observation_source ON observation(source_id);
+CREATE INDEX IF NOT EXISTS idx_object_geometry ON infrastructure_object USING GIST (geometry);
+CREATE INDEX IF NOT EXISTS idx_observation_object_attribute ON observation(object_id, attribute);
+CREATE INDEX IF NOT EXISTS idx_observation_source ON observation(source_id);
