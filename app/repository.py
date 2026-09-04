@@ -1,4 +1,6 @@
 import json
+import re
+from collections import Counter, defaultdict
 from typing import Any
 
 from sqlalchemy import text
@@ -110,3 +112,58 @@ def load_infrastructure_inventory(root_object_key: str, station: str) -> dict[st
     with get_engine().connect() as connection:
         rows = [dict(row) for row in connection.execute(sql, {"root_key": root_object_key}).mappings()]
     return build_infrastructure_inventory(rows, station)
+
+
+def summarize_infrastructure_inventory(inventory: dict[str, Any]) -> dict[str, Any]:
+    type_counts = Counter(item["object_type"] for item in inventory["objects"])
+    equipment_types: Counter[str] = Counter()
+    platform_edges: list[str] = []
+    conflicts: list[dict[str, Any]] = []
+    root_attributes: set[str] = set()
+    entrance_has_coordinates = False
+
+    for item in inventory["objects"]:
+        by_attribute: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for observation in item["observations"]:
+            by_attribute[observation["attribute"]].append(observation)
+        latest_by_attribute: dict[str, list[dict[str, Any]]] = {}
+        for attribute, observations in by_attribute.items():
+            latest_by_source: dict[str, dict[str, Any]] = {}
+            for observation in observations:
+                latest_by_source[observation["source_key"]] = observation
+            latest = list(latest_by_source.values())
+            latest_by_attribute[attribute] = latest
+            distinct_values = {
+                (json.dumps(obs["value"], sort_keys=True, default=str), obs.get("unit")) for obs in latest
+            }
+            if len(distinct_values) > 1:
+                conflicts.append({"object_key": item["object_key"], "attribute": attribute, "evidence": latest})
+
+        if item["depth"] == 0:
+            root_attributes.update(latest_by_attribute)
+        if item["object_type"] == "platform_edge" and latest_by_attribute.get("name"):
+            platform_edges.append(str(latest_by_attribute["name"][-1]["value"]))
+        if item["object_type"] == "equipment" and latest_by_attribute.get("equipment_type"):
+            equipment_types[str(latest_by_attribute["equipment_type"][-1]["value"])] += 1
+        if item["object_type"] == "entrance":
+            entrance_has_coordinates |= {"latitude", "longitude"}.issubset(latest_by_attribute)
+
+    data_gaps = []
+    if not {"latitude", "longitude"}.issubset(root_attributes):
+        data_gaps.append({"code": "station_coordinates_missing", "source": "openstation_netex"})
+    if not entrance_has_coordinates:
+        data_gaps.append({"code": "entrance_coordinates_missing", "source": "openstation_netex"})
+    if equipment_types.get("LiftEquipment", 0) == 0:
+        data_gaps.append({"code": "lift_data_missing", "source": "openstation_netex"})
+
+    def track_sort_key(value: str) -> tuple[int, str]:
+        number = re.match(r"\d+", value)
+        return (int(number.group()) if number else 10**9, value)
+
+    return {
+        "station": inventory["station"], "object_count": inventory["object_count"],
+        "object_types": dict(sorted(type_counts.items())),
+        "platform_edges": sorted(platform_edges, key=track_sort_key),
+        "equipment_types": dict(sorted(equipment_types.items())),
+        "conflict_count": len(conflicts), "conflicts": conflicts, "data_gaps": data_gaps,
+    }
