@@ -8,10 +8,10 @@ from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SO
 from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBERG_SERVICE_TRACK_CONFLICTS, SOURCE_2026 as SERVICE_TRACK_SOURCE
 from app.services.change_report import build_change_report
 
-app = FastAPI(title="Rail Infrastructure Intelligence", version="0.6.0", description="Source-aware digital infrastructure twin for railway stations.")
+app = FastAPI(title="Rail Infrastructure Intelligence", version="0.7.0", description="Source-aware digital infrastructure twin for railway stations.")
 
 @app.get("/")
-def root(): return {"service": "rail-infrastructure-intelligence", "version": "0.6.0", "pilot": "Friedberg (Hess)", "docs": "/docs"}
+def root(): return {"service": "rail-infrastructure-intelligence", "version": "0.7.0", "pilot": "Friedberg (Hess)", "docs": "/docs"}
 
 @app.get("/health")
 def health(): return {"status": "ok"}

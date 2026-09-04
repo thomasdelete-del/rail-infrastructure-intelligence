@@ -7,18 +7,20 @@ from app.database import get_engine
 
 
 def load_observations(source_key: str | None = None) -> list[dict[str, Any]]:
-    sql = text('''
+    source_filter = "" if source_key is None else "WHERE s.source_key = :source_key"
+    sql = text(f'''
         SELECT io.object_key, io.object_type, o.attribute, o.value_json, o.unit,
                s.source_key, s.url AS source_url, s.quality_class,
                o.method, o.is_derived, o.note, o.provenance
         FROM observation o
         JOIN infrastructure_object io ON io.id = o.object_id
         JOIN source s ON s.id = o.source_id
-        WHERE (:source_key IS NULL OR s.source_key = :source_key)
+        {source_filter}
         ORDER BY o.observed_at NULLS LAST, o.id
     ''')
     with get_engine().connect() as connection:
-        rows = connection.execute(sql, {"source_key": source_key}).mappings()
+        parameters = {"source_key": source_key} if source_key is not None else {}
+        rows = connection.execute(sql, parameters).mappings()
         return [
             {
                 "object_key": row["object_key"], "object_type": row["object_type"],
