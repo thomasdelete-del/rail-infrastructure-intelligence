@@ -2,6 +2,7 @@ from datetime import date
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 from app.collectors.openstation import OpenStationCollector
 from app.collectors.osm import OpenStreetMapCollector
 from app.collectors.stada import StaDaCollector
@@ -15,6 +16,7 @@ from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SO
 from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBERG_SERVICE_TRACK_CONFLICTS, SOURCE_2026 as SERVICE_TRACK_SOURCE
 from app.services.change_report import build_change_report
 from app.services.aerial_analysis import analyse_osm_platform
+from app.services.aerial_learning import store_training_sample
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
 app.add_middleware(
@@ -25,7 +27,7 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173",
     ],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -84,6 +86,21 @@ async def osm_aerial_analysis(track: str = Query(min_length=1, max_length=4, pat
         raise HTTPException(status_code=409, detail=str(error)) from error
     except httpx.HTTPError as error:
         raise HTTPException(status_code=502, detail="Luftbild- oder OSM-Quelle ist vorübergehend nicht erreichbar") from error
+
+
+class AerialTrainingFeedback(BaseModel):
+    track: str
+    endpoint: str
+    accepted: bool
+    features: dict
+
+
+@app.post("/stations/friedberg-hess/aerial-analysis/training-feedback")
+def aerial_training_feedback(feedback: AerialTrainingFeedback):
+    if feedback.endpoint not in {"start", "end"}:
+        raise HTTPException(status_code=422, detail="endpoint must be start or end")
+    stored = store_training_sample(feedback.track, feedback.endpoint, feedback.accepted, feedback.features)
+    return {"stored": stored, "learning": "supervised_online_logistic_regression"}
 
 @app.get("/stations/friedberg-hess/change-report/rinf")
 async def rinf_change_report(persist: bool = False):

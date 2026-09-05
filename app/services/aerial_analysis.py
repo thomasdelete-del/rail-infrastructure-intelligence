@@ -10,6 +10,7 @@ import httpx
 import numpy as np
 
 from app.collectors.osm import OpenStreetMapCollector, parse_osm_friedberg
+from app.services.aerial_learning import learned_probability
 
 
 WMS_URL = "https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows"
@@ -180,6 +181,9 @@ def analyse_platform_crop(
 
     start_detection = detect_endpoint(start_xy, start_axis, 1)
     end_detection = detect_endpoint(end_xy, end_axis, -1)
+    def detection_features(detection: tuple[np.ndarray, float, float, float]) -> dict[str, Any]:
+        return {"shift_m": round(detection[1], 1), "prominence": round(detection[2], 3),
+                "termination_ratio": round(detection[3], 3), "paired_corridor": bool(paired_geometry)}
     def endpoint_confidence(detection: tuple[np.ndarray, float, float, float]) -> float:
         _, shift, prominence, termination_ratio = detection
         osm_prior = 0.45 if abs(shift) <= 3 else 0.0
@@ -193,11 +197,13 @@ def analyse_platform_crop(
         if start_detection:
             result.update(candidate_start=_latlon(*start_detection[0]), start_shift_m=round(start_detection[1], 1),
                           start_confidence=endpoint_confidence(start_detection),
-                          start_termination_ratio=round(start_detection[3], 2))
+                          start_termination_ratio=round(start_detection[3], 2),
+                          start_features=detection_features(start_detection))
         if end_detection:
             result.update(candidate_end=_latlon(*end_detection[0]), end_shift_m=round(end_detection[1], 1),
                           end_confidence=endpoint_confidence(end_detection),
-                          end_termination_ratio=round(end_detection[3], 2))
+                          end_termination_ratio=round(end_detection[3], 2),
+                          end_features=detection_features(end_detection))
         return result
     candidate_start_xy, start_shift, start_prominence, start_termination = start_detection
     candidate_end_xy, end_shift, end_prominence, end_termination = end_detection
@@ -223,6 +229,8 @@ def analyse_platform_crop(
         "end_confidence": end_confidence,
         "start_termination_ratio": round(start_termination, 2),
         "end_termination_ratio": round(end_termination, 2),
+        "start_features": detection_features(start_detection),
+        "end_features": detection_features(end_detection),
         "method": "Bahnsteigkorridor-Prüfung: Querabschluss und Abbruch beider seitlichen Begrenzungen",
     }
 
@@ -267,6 +275,15 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
         response = await client.get(WMS_URL, params=params, headers={"User-Agent": "rail-infrastructure-intelligence/1.2"})
         response.raise_for_status()
     result = analyse_platform_crop(response.content, bbox, geometry, paired_geometry)
+    for endpoint in ("start", "end"):
+        features = result.get(f"{endpoint}_features")
+        if features:
+            try:
+                probability, sample_count = learned_probability(features)
+            except RuntimeError:
+                probability, sample_count = None, 0
+            result[f"{endpoint}_learned_probability"] = probability
+            result["training_sample_count"] = sample_count
     result.update({
         "station": "Friedberg (Hess)", "track": track,
         "osm": {"type": element["type"], "id": element["id"], "url": f"https://www.openstreetmap.org/{element['type']}/{element['id']}"},

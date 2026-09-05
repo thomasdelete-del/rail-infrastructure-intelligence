@@ -16,6 +16,7 @@ export type StationMapPoint = {
 };
 
 const FRIEDBERG_CENTER: [number, number] = [50.33269, 8.76126];
+const API = 'https://rail-infrastructure-intelligence-production.up.railway.app';
 const HESSEN_DOP_WMS = 'https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows';
 const HESSEN_GEODATENVIEWER = 'https://www.geoportal.hessen.de/map?LAYER%5Bzoom%5D=1&LAYER%5Bid%5D=52119&LAYER%5Bvisible%5D=1&LAYER%5Bquerylayer%5D=1';
 const markerColors: Record<string, string> = {
@@ -40,7 +41,7 @@ function escapeHtml(value: string) {
 }
 
 export type CoordinateEdit = { objectKey: string; coordinateType: 'start' | 'end'; title: string };
-export type AerialReviewAnalysis = { status: 'plausible' | 'check' | 'high' | 'insufficient_evidence'; confidence: number; reason?: string; length_conflict?: boolean; candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; start_shift_m?: number; end_shift_m?: number; start_confidence?: number; end_confidence?: number; maximum_endpoint_shift_m?: number; advisory_only: boolean };
+export type AerialReviewAnalysis = { status: 'plausible' | 'check' | 'high' | 'insufficient_evidence'; confidence: number; reason?: string; length_conflict?: boolean; candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; start_shift_m?: number; end_shift_m?: number; start_confidence?: number; end_confidence?: number; start_features?: Record<string, number | boolean>; end_features?: Record<string, number | boolean>; start_learned_probability?: number | null; end_learned_probability?: number | null; training_sample_count?: number; maximum_endpoint_shift_m?: number; advisory_only: boolean };
 
 export function StationMap({ points, focusObjectKey, coordinateEdit, aerialReviewRequest, aerialResults, onSelect, onNavigateEndpoint, onBeginCoordinateEdit, onCoordinateChange, onCancelEdit }: {
   points: StationMapPoint[];
@@ -65,6 +66,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [imageryOpacity, setImageryOpacity] = useState(65);
   const [mapReady, setMapReady] = useState(false);
+  const [learningMessage, setLearningMessage] = useState<string | null>(null);
   const reviewEndpoints = points.filter((point) => point.objectType === 'platform_edge' && (point.coordinateType === 'start' || point.coordinateType === 'end'));
   const reviewIndex = aerialReviewRequest ? reviewEndpoints.findIndex((point) => point.objectKey === aerialReviewRequest.objectKey && point.coordinateType === aerialReviewRequest.coordinateType) : -1;
   const currentReviewPoint = reviewIndex >= 0 ? reviewEndpoints[reviewIndex] : null;
@@ -78,6 +80,21 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
     const next = reviewEndpoints[nextIndex];
     const track = next.title.replace(/^Gleis\s+/i, '');
     onNavigateEndpoint(next.objectKey, aerialResults[track], next.coordinateType as 'start' | 'end');
+  };
+  const submitTrainingFeedback = async (accepted: boolean) => {
+    if (!currentReviewPoint || !currentResult) return;
+    const endpoint = currentReviewPoint.coordinateType as 'start' | 'end';
+    const features = endpoint === 'start' ? currentResult.start_features : currentResult.end_features;
+    if (!features) { setLearningMessage('Kein lernbarer Kandidat vorhanden'); return; }
+    setLearningMessage('Bewertung wird gespeichert …');
+    try {
+      const response = await fetch(`${API}/stations/friedberg-hess/aerial-analysis/training-feedback`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ track: currentTrack, endpoint, accepted, features }),
+      });
+      if (!response.ok) throw new Error();
+      setLearningMessage(accepted ? 'Als echter Abschluss gelernt' : 'Als Fehlkandidat gelernt');
+    } catch { setLearningMessage('Bewertung konnte nicht gespeichert werden'); }
   };
 
   useEffect(() => {
@@ -272,7 +289,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
         <button type="button" className="map-icon-button" aria-label="Bahnhof zentrieren" title="Bahnhof zentrieren" onClick={resetView}><LocateFixed size={18}/></button>
       </div>
       {coordinateEdit ? <div className="coordinate-edit-banner"><Crosshair size={18}/><span><strong>{coordinateEdit.title}</strong>: neuen {coordinateEdit.coordinateType === 'start' ? 'Anfang' : 'Endpunkt'} in der Karte anklicken</span><button type="button" onClick={onCancelEdit} aria-label="Koordinatenänderung abbrechen"><X size={17}/></button></div> : null}
-      {currentReviewPoint ? <div className="endpoint-review-nav"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>{currentReviewPoint.title} · {currentReviewPoint.coordinateType === 'start' ? 'Anfang' : 'Ende'}</strong><span>{currentResult?.length_conflict ? 'Nicht bestätigt · Längenkonflikt' : currentShift === undefined ? 'Nicht eindeutig bestätigt' : Math.abs(currentShift) <= 3 ? `OSM bestätigt · ${Math.round((currentConfidence ?? 0) * 100)}%` : `Abweichung ${currentShift >= 0 ? '+' : ''}${currentShift.toFixed(1)} m · ${Math.round((currentConfidence ?? 0) * 100)}%`}</span></div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
+      {currentReviewPoint ? <div className="endpoint-review-nav"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>{currentReviewPoint.title} · {currentReviewPoint.coordinateType === 'start' ? 'Anfang' : 'Ende'}</strong><span>{currentResult?.length_conflict ? 'Nicht bestätigt · Längenkonflikt' : currentShift === undefined ? 'Nicht eindeutig bestätigt' : Math.abs(currentShift) <= 3 ? `OSM-Kandidat · ${Math.round((currentConfidence ?? 0) * 100)}%` : `Abweichung ${currentShift >= 0 ? '+' : ''}${currentShift.toFixed(1)} m · ${Math.round((currentConfidence ?? 0) * 100)}%`}</span><small>{currentResult?.training_sample_count ? `Lernmodell: ${currentResult.training_sample_count} Bewertungen` : 'Lernmodell: Lernphase'}</small><div className="endpoint-learning-actions"><button type="button" onClick={() => void submitTrainingFeedback(true)}>Abschluss korrekt</button><button type="button" onClick={() => void submitTrainingFeedback(false)}>Kein Abschluss</button></div>{learningMessage ? <small>{learningMessage}</small> : null}</div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
       <div className="map-legend"><span><i className="legend-station"/>Bahnhof</span><span><i className="legend-platform"/>Bahnsteig</span><span><i className="legend-track-coordinate"/>Gleiskoordinate</span><span><i className="legend-platform-start"/>Bahnsteiganfang</span><span><i className="legend-platform-end"/>Bahnsteigende</span><span><i className="legend-coordinate-draft"/>Aktualisierter Punkt</span><span><i className="legend-entrance"/>Zugang</span><span><i className="legend-equipment"/>Ausstattung</span><span className="legend-source"><Layers3 size={14}/>OSM-Punkte</span></div>
     </div>
   </section>;
