@@ -99,11 +99,18 @@ def analyse_platform_crop(
     candidate_end_xy, end_shift, end_prominence = end_detection
     candidate_length = float(np.linalg.norm(candidate_end_xy - candidate_start_xy))
     endpoint_shift = max(abs(start_shift), abs(end_shift))
+    if endpoint_shift > 8:
+        return {
+            "status": "insufficient_evidence",
+            "confidence": 0.0,
+            "reason": "Bildkante liegt mehr als 8 m vom OSM-Endpunkt entfernt und ist ohne zweite Bestätigung nicht als Bahnsteigende belastbar",
+            "start_candidate_shift_m": round(start_shift, 1),
+            "end_candidate_shift_m": round(end_shift, 1),
+            "method": "Konservative lokale Endpunktsuche ±35 m; Fernkandidaten werden verworfen",
+        }
     length_delta = candidate_length - osm_length
     confidence = round(min(0.9, min(start_prominence, end_prominence) / 4.5), 2)
     status = "plausible" if endpoint_shift <= 3 else "check"
-    if endpoint_shift > 10:
-        status = "high"
     return {
         "status": status,
         "confidence": confidence,

@@ -22,12 +22,11 @@ def test_detects_parallel_aerial_edges_and_proposes_longer_extent():
         [_geometry_point(40, 40), _geometry_point(160, 40)],
     )
 
-    assert result["status"] in {"check", "high"}
-    assert result["candidate_length_m"] > 145
-    assert result["length_delta_m"] > 20
-    assert result["confidence"] >= 0.5
-    assert abs(result["start_shift_m"]) >= 15
-    assert abs(result["end_shift_m"]) >= 15
+    assert result["status"] == "insufficient_evidence"
+    assert result["confidence"] == 0
+    assert "mehr als 8 m" in result["reason"]
+    assert abs(result["start_candidate_shift_m"]) >= 15
+    assert abs(result["end_candidate_shift_m"]) >= 15
 
 
 def test_returns_insufficient_evidence_for_blank_crop():
