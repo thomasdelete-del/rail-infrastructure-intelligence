@@ -1,7 +1,6 @@
 from app.collectors.fasta import parse_fasta_facilities
 from app.collectors.osm import ROOT_OBJECT_KEY, parse_osm_friedberg
 from app.collectors.stada import parse_stada_station
-from app.collectors.isr import parse_isr_platforms
 
 
 def test_osm_requires_exact_friedberg_identity():
@@ -65,24 +64,3 @@ def test_fasta_creates_separate_facility_observations():
     assert len(observations) == 5
     assert {item.object_key for item in observations} == {"FRI-FASTA-4711"}
     assert next(item.value for item in observations if item.attribute == "operational_state") == "ACTIVE"
-
-
-def test_isr_maps_usable_length_and_rejects_other_friedbergs():
-    payload = {"items": [
-        {"bst_rl100": "FFG", "bst_stelle_name": "Friedberg (Hess)",
-         "alg_gleisnummer_verk_de": "1", "alg_gleisnummer_betr_de": "101",
-         "alg_max_nutzlaenge_de": "275,5", "bste_id": 4711, "jfpl": 2027,
-         "zeitscheibe": "2026.09.05 01:23:45", "lade_id": 9},
-        {"bst_rl100": "MFB", "bst_stelle_name": "Friedberg (Bay)",
-         "alg_gleisnummer_verk_de": "1", "alg_max_nutzlaenge_de": "400"},
-    ]}
-    observations = parse_isr_platforms(payload)
-    assert len(observations) == 1
-    observation = observations[0]
-    assert observation.object_key == "FRI-PE-1"
-    assert observation.attribute == "usable_length"
-    assert observation.value == 275.5
-    assert observation.unit == "m"
-    assert observation.source_key == "db-infrago-isr"
-    assert observation.source_date == "2026-09-05"
-    assert observation.metadata["operational_track"] == "101"

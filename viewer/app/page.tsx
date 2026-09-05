@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ChevronRight, Database, ExternalLink, Filter, MapPinOff, RefreshCw, Search, ShieldCheck, TrainFront, X } from 'lucide-react';
-import { StationMap, type StationMapPoint } from './station-map';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ChevronRight, Crosshair, Database, ExternalLink, Filter, MapPinOff, RefreshCw, Search, ShieldCheck, TrainFront, X } from 'lucide-react';
+import { StationMap, type CoordinateEdit, type StationMapPoint } from './station-map';
 
 const API = 'https://rail-infrastructure-intelligence-production.up.railway.app';
 type Evidence = { attribute: string; value: unknown; unit: string | null; source_key: string; provenance?: Record<string, unknown> };
@@ -13,6 +13,8 @@ type SourceStatus = { key: string; name: string; configured: boolean; quality_cl
 type ReferenceObservation = { attribute: string; value: unknown; unit: string | null; source_id: string; note?: string };
 type ReferenceEdge = { object_id: string; track: string; observations: ReferenceObservation[] };
 type ReferenceStation = { platform_edges: ReferenceEdge[]; sources: { id: string; publisher: string; source_date: string; url: string }[] };
+type Coordinate = { latitude: number; longitude: number };
+type CoordinateDrafts = Record<string, Coordinate>;
 
 function currentValue(object: InfraObject, attribute: string) {
   const values = object.observations.filter((item) => item.attribute === attribute);
@@ -46,6 +48,9 @@ export default function Home() {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<(typeof filters)[number]>('all');
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [focusObjectKey, setFocusObjectKey] = useState<string | null>(null);
+  const [coordinateEdit, setCoordinateEdit] = useState<CoordinateEdit | null>(null);
+  const [coordinateDrafts, setCoordinateDrafts] = useState<CoordinateDrafts>({});
 
   async function load() {
     setRefreshing(true); setError(false);
@@ -63,6 +68,9 @@ export default function Home() {
   }
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    try { setCoordinateDrafts(JSON.parse(localStorage.getItem('friedberg-coordinate-drafts') ?? '{}') as CoordinateDrafts); } catch { setCoordinateDrafts({}); }
+  }, []);
   const platforms = useMemo(() => {
     if (!inventory) return [];
     return inventory.objects.filter((item) => item.object_type === 'platform').map((platform) => ({
@@ -84,7 +92,8 @@ export default function Home() {
     if (!inventory) return [];
     const points: StationMapPoint[] = [];
     inventory.objects.forEach((item) => {
-      const title = currentValue(item, 'name') ?? equipmentLabels[currentValue(item, 'equipment_type') ?? ''] ?? typeLabels[item.object_type] ?? item.object_type;
+      const rawTitle = currentValue(item, 'name') ?? equipmentLabels[currentValue(item, 'equipment_type') ?? ''] ?? typeLabels[item.object_type] ?? item.object_type;
+      const title = item.object_type === 'platform_edge' && !/^Gleis\s/i.test(rawTitle) ? `Gleis ${rawTitle}` : rawTitle;
       const latitude = numericValue(item, 'latitude');
       const longitude = numericValue(item, 'longitude');
       if (latitude !== null && longitude !== null) points.push({ id: `${item.object_key}:position`, objectKey: item.object_key, latitude, longitude, title, objectType: item.object_type, coordinateType: 'position' });
@@ -93,12 +102,31 @@ export default function Home() {
         const coordinate = observation?.value as { latitude?: unknown; longitude?: unknown } | undefined;
         const pointLatitude = Number(coordinate?.latitude);
         const pointLongitude = Number(coordinate?.longitude);
-        if (Number.isFinite(pointLatitude) && Number.isFinite(pointLongitude)) points.push({ id: `${item.object_key}:${attribute}`, objectKey: item.object_key, latitude: pointLatitude, longitude: pointLongitude, title, objectType: item.object_type, coordinateType: attribute === 'start_coordinates' ? 'start' : 'end' });
+        const coordinateType = attribute === 'start_coordinates' ? 'start' : 'end';
+        const draft = coordinateDrafts[`${item.object_key}:${coordinateType}`];
+        const latitudeValue = draft?.latitude ?? pointLatitude;
+        const longitudeValue = draft?.longitude ?? pointLongitude;
+        if (Number.isFinite(latitudeValue) && Number.isFinite(longitudeValue)) points.push({ id: `${item.object_key}:${attribute}`, objectKey: item.object_key, latitude: latitudeValue, longitude: longitudeValue, title, objectType: item.object_type, coordinateType });
       });
     });
     return points;
-  }, [inventory]);
+  }, [coordinateDrafts, inventory]);
   const selectedObject = inventory?.objects.find((item) => item.object_key === selectedKey) ?? filteredObjects[0] ?? null;
+  const handleCoordinateChange = useCallback((edit: CoordinateEdit, latitude: number, longitude: number) => {
+    const key = `${edit.objectKey}:${edit.coordinateType}`;
+    setCoordinateDrafts((current) => {
+      const next = { ...current, [key]: { latitude, longitude } };
+      localStorage.setItem('friedberg-coordinate-drafts', JSON.stringify(next));
+      return next;
+    });
+    setCoordinateEdit(null);
+    setFocusObjectKey(edit.objectKey);
+  }, []);
+  const focusPlatform = useCallback((objectKey: string) => {
+    setSelectedKey(objectKey);
+    setFocusObjectKey(objectKey);
+    document.getElementById('station-map')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   return <main className="min-h-screen bg-background text-foreground">
     <header className="border-b border-border bg-[#071b2b] text-white"><div className="mx-auto flex max-w-[1440px] items-center justify-between px-5 py-4 lg:px-10">
@@ -108,7 +136,7 @@ export default function Home() {
     <div className="mx-auto max-w-[1440px] px-5 py-7 lg:px-10 lg:py-10">
       <section className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p className="mb-2 text-sm font-semibold uppercase tracking-[0.16em] text-[#b25b18]">Infrastruktur-Viewer</p><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Friedberg (Hess)</h1><p className="mt-2 text-base text-muted-foreground">Quellenbelegter Ist-Zustand aus mehreren unabhängigen Datenquellen</p></div><div className="flex items-center gap-2 text-sm text-muted-foreground"><Database size={16}/>{updated ? `Abgerufen ${updated.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}` : 'Live-Daten werden geladen'}</div></section>
       {error ? <section className="mb-7 rounded-lg border border-red-300 bg-red-50 p-5 text-red-900"><p className="font-semibold">Datenquelle momentan nicht erreichbar</p><p className="mt-1 text-sm">Bitte in einigen Sekunden erneut aktualisieren.</p></section> : null}
-      <StationMap points={mapPoints} onSelect={setSelectedKey}/>
+      <StationMap points={mapPoints} focusObjectKey={focusObjectKey} coordinateEdit={coordinateEdit} onSelect={setSelectedKey} onCoordinateChange={handleCoordinateChange} onCancelEdit={() => setCoordinateEdit(null)}/>
       <section className="mb-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Infrastrukturobjekte" value={state?.object_count} accent="navy"/><Metric label="Bahnsteigkanten" value={state?.object_types.platform_edge} accent="orange"/><Metric label="Ausstattung" value={state?.object_types.equipment} accent="steel"/><Metric label="Aktuelle Konflikte" value={state?.conflict_count} accent="green"/></section>
       <section className="mb-7 rounded-xl border border-border bg-card shadow-sm"><div className="flex flex-col justify-between gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:px-6"><div><h2 className="text-lg font-bold">Datenquellen</h2><p className="mt-1 text-sm text-muted-foreground">Aktive Verbindungen und Qualitätsklasse</p></div><span className="text-sm font-semibold text-[#176944]">{sources.filter((source) => source.configured).length} von {sources.length || 4} verbunden</span></div><div className="source-grid">{sources.map((source) => <div className="source-row" key={source.key}><span className={`source-indicator ${source.configured ? 'source-active' : 'source-pending'}`}/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{source.name}</p><p className="mt-1 text-xs text-muted-foreground">Qualitätsklasse {source.quality_class}</p></div><span className={source.configured ? 'source-state-active' : 'source-state-pending'}>{source.configured ? 'Aktiv' : 'Zugang fehlt'}</span></div>)}</div></section>
       <div className="grid gap-7 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.75fr)]">
@@ -117,7 +145,7 @@ export default function Home() {
           <section className="rounded-xl border border-[#e9c9ad] bg-[#fff9f3] shadow-sm"><div className="flex items-center gap-2 border-b border-[#efd8c5] px-5 py-4 text-[#87420f]"><AlertTriangle size={18}/><h2 className="text-lg font-bold">Datenlücken</h2></div><div className="space-y-4 p-5">{state?.data_gaps.map((gap) => { const copy = gapLabels[gap.code] ?? { title: gap.code, text: gap.source }; return <div key={gap.code} className="flex gap-3"><MapPinOff size={17} className="mt-0.5 shrink-0 text-[#b25b18]"/><div><p className="text-sm font-semibold">{copy.title}</p><p className="mt-0.5 text-sm leading-5 text-[#73543d]">{copy.text}</p></div></div>; })}</div></section>
         </div>
       </div>
-      <PlatformDataTable reference={reference} inventory={inventory}/>
+      <PlatformDataTable reference={reference} inventory={inventory} coordinateDrafts={coordinateDrafts} onFocus={focusPlatform} onEdit={(edit) => { setCoordinateEdit(edit); focusPlatform(edit.objectKey); }}/>
       <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="border-b border-border px-5 py-5 sm:px-6"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h2 className="text-lg font-bold">Objektkatalog</h2><p className="mt-1 text-sm text-muted-foreground">Infrastruktur durchsuchen und Evidenz im Detail prüfen</p></div><label className="search-box"><Search size={17}/><span className="sr-only">Objekte durchsuchen</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, Gleis oder NeTEx-ID"/>{query ? <button aria-label="Suche löschen" onClick={() => setQuery('')}><X size={16}/></button> : null}</label></div>
           <div className="mt-4 flex flex-wrap gap-2" aria-label="Objekttyp filtern"><Filter size={16} className="mt-2 text-muted-foreground"/>{filters.map((filter) => <button key={filter} aria-pressed={typeFilter === filter} onClick={() => setTypeFilter(filter)} className="filter-button">{filter === 'all' ? 'Alle' : typeLabels[filter]}{filter !== 'all' && state ? <span>{state.object_types[filter] ?? 0}</span> : null}</button>)}</div>
@@ -139,7 +167,7 @@ export default function Home() {
 function Metric({ label, value, accent }: { label: string; value?: number; accent: string }) { return <div className={`metric metric-${accent}`}><p>{label}</p><strong>{value ?? '–'}</strong></div>; }
 function PlatformRow({ name, edges, index }: { name: string; edges: string[]; index: number }) { return <div className="platform-row"><div className="platform-index">B{index}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-muted-foreground">{name}</p><div className="mt-2 flex flex-wrap gap-2">{edges.map((edge) => <span key={edge} className="track-pill">Gleis {edge}</span>)}</div></div><div className="hidden h-1 w-20 rounded-full bg-[#f5a623] sm:block"/></div>; }
 
-function PlatformDataTable({ reference, inventory }: { reference: ReferenceStation | null; inventory: Inventory | null }) {
+function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, onEdit }: { reference: ReferenceStation | null; inventory: Inventory | null; coordinateDrafts: CoordinateDrafts; onFocus: (objectKey: string) => void; onEdit: (edit: CoordinateEdit) => void }) {
   const value = (edge: ReferenceEdge, attribute: string) => edge.observations.find((item) => item.attribute === attribute);
   const osmValue = (edge: ReferenceEdge, attribute: string) => inventory?.objects.find((item) => item.object_key === edge.object_id)?.observations.filter((item) => item.attribute === attribute && item.source_key === 'openstreetmap').at(-1);
   const comparison = (edge: ReferenceEdge) => {
@@ -160,13 +188,20 @@ function PlatformDataTable({ reference, inventory }: { reference: ReferenceStati
     return `${String(observation.value)}${observation.unit ? ` ${observation.unit}` : ''}`;
   };
   const cell = (observation: ReferenceObservation | Evidence | undefined, source: string) => observation ? <div className="data-value"><strong>{format(observation)}</strong><span>{source}</span></div> : <span className="data-missing">Nicht geliefert</span>;
+  const coordinateCell = (edge: ReferenceEdge, coordinateType: 'start' | 'end') => {
+    const attribute = coordinateType === 'start' ? 'start_coordinates' : 'end_coordinates';
+    const draft = coordinateDrafts[`${edge.object_id}:${coordinateType}`];
+    const observation = osmValue(edge, attribute);
+    const shown = draft ? `${draft.latitude.toFixed(6)}, ${draft.longitude.toFixed(6)}` : format(observation);
+    return <div className="coordinate-cell"><div className="data-value"><strong>{shown ?? 'Nicht geliefert'}</strong><span>{draft ? 'Manueller Prüfvorschlag' : 'OpenStreetMap'}</span></div><button type="button" onClick={() => onEdit({ objectKey: edge.object_id, coordinateType, title: `Gleis ${edge.track}` })}><Crosshair size={13}/>{coordinateType === 'start' ? 'Anfang' : 'Ende'} anpassen</button></div>;
+  };
   return <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-    <div className="flex flex-col justify-between gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten und Plausibilitätscheck</h2><p className="mt-1 text-sm text-muted-foreground">DB-Maße gegen OSM-Geometrie; Endpunkte können oben direkt über dem Luftbild geprüft werden.</p></div><div className="comparison-summary"><span className="comparison-low">{comparisons.filter((item) => item?.level === 'low').length} geringe</span><span className="comparison-check">{comparisons.filter((item) => item?.level === 'check').length} prüfen</span><span className="comparison-high">{comparisons.filter((item) => item?.level === 'high').length} auffällig</span></div></div>
-    <div className="platform-data-scroll"><table className="platform-data-table"><thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Abweichung</th><th>Nutzlänge ISR</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead><tbody>
-      {reference?.platform_edges.map((edge) => { const deviation = comparison(edge); return <tr key={edge.object_id} className={deviation?.level === 'high' ? 'row-deviation-high' : undefined}><td><span className="track-pill">Gleis {edge.track}</span></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td>{cell(osmValue(edge, 'construction_length'), 'OSM · Geometrie')}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{deviation ? <div className={`deviation deviation-${deviation.level}`}><strong>{deviation.delta >= 0 ? '+' : ''}{deviation.delta.toFixed(1)} m</strong><span>{deviation.percent.toFixed(1)}% · {deviation.level === 'low' ? 'gering' : deviation.level === 'check' ? 'prüfen' : 'auffällig'}</span></div> : <span className="data-missing">Nicht vergleichbar</span>}</td><td>{value(edge, 'usable_length') ? cell(value(edge, 'usable_length'), 'DB InfraGO ISR') : <div className="data-value"><span className="data-missing">ISR-Abruf ausstehend</span><span>DB InfraGO ISR</span></div>}</td><td>{cell(osmValue(edge, 'start_coordinates'), 'OSM')}</td><td>{cell(osmValue(edge, 'end_coordinates'), 'OSM')}</td></tr>; })}
+    <div className="flex flex-col justify-between gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten und Plausibilitätscheck</h2><p className="mt-1 text-sm text-muted-foreground">DB-Maße gegen OSM-Geometrie; Endpunkte können oben wahlweise auf Satellitenbild oder amtlichem Hessen-DOP geprüft werden.</p></div><div className="comparison-summary"><span className="comparison-low">{comparisons.filter((item) => item?.level === 'low').length} geringe</span><span className="comparison-check">{comparisons.filter((item) => item?.level === 'check').length} prüfen</span><span className="comparison-high">{comparisons.filter((item) => item?.level === 'high').length} auffällig</span></div></div>
+    <div className="platform-data-scroll"><table className="platform-data-table"><thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Abweichung</th><th>Nutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead><tbody>
+      {reference?.platform_edges.map((edge) => { const deviation = comparison(edge); return <tr key={edge.object_id} className={deviation?.level === 'high' ? 'row-deviation-high' : undefined}><td><button type="button" className="track-pill track-focus" onClick={() => onFocus(edge.object_id)}>Gleis {edge.track}</button></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td>{cell(osmValue(edge, 'construction_length'), 'OSM · Geometrie')}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{deviation ? <button type="button" className={`deviation deviation-${deviation.level} deviation-button`} onClick={() => onFocus(edge.object_id)} title="Auf der Karte anzeigen"><strong>{deviation.delta >= 0 ? '+' : ''}{deviation.delta.toFixed(1)} m</strong><span>{deviation.percent.toFixed(1)}% · {deviation.level === 'low' ? 'gering' : deviation.level === 'check' ? 'prüfen' : 'auffällig'}</span></button> : <span className="data-missing">Nicht vergleichbar</span>}</td><td><div className="data-value"><span className="data-missing">Nicht verfügbar</span><span>Kostenpflichtige ISR-API deaktiviert</span></div></td><td>{coordinateCell(edge, 'start')}</td><td>{coordinateCell(edge, 'end')}</td></tr>; })}
       {!reference ? Array.from({ length: 4 }, (_, index) => <tr key={index}><td colSpan={8}><div className="h-8 animate-pulse rounded bg-muted"/></td></tr>) : null}
     </tbody></table></div>
-    <div className="platform-data-note"><AlertTriangle size={16}/><p>Bewertung: bis 5% geringe Abweichung, bis 15% prüfen, darüber auffällig. OSM-Geometrielänge und DB-Nettobaulänge sind nicht definitionsgleich; die Kennzeichnung ist ein Prüfhinweis, kein Vermessungsnachweis. Für Endpunkte Satellit oben einschalten.</p></div>
+    <div className="platform-data-note"><AlertTriangle size={16}/><p>Bewertung: bis 5% geringe Abweichung, bis 15% prüfen, darüber auffällig. Abweichung anklicken, um zur Kante zu springen. Manuelle Koordinatenänderungen werden lokal als Prüfvorschlag gespeichert und überschreiben den OSM-Quellwert nicht.</p></div>
   </section>;
 }
 

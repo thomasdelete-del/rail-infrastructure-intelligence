@@ -38,10 +38,7 @@ def test_track_55_anomaly_is_not_silently_corrected():
     assert conflict["status"] == "needs_verification"
 
 
-def test_isr_is_listed_as_authoritative_source(monkeypatch):
-    monkeypatch.delenv("DB_API_CLIENT_ID", raising=False)
-    monkeypatch.delenv("DB_API_KEY", raising=False)
-    isr = next(source for source in source_status()["sources"] if source["key"] == "db-infrago-isr")
-    assert isr["quality_class"] == "A"
-    assert isr["configured"] is False
-    assert any("ISR Data Service" in gap for gap in FRIEDBERG["data_gaps"])
+def test_source_status_uses_free_hessian_geodata_and_no_isr():
+    sources = source_status()["sources"]
+    assert any(source["key"] == "geoportal-hessen-dop20" and source["configured"] for source in sources)
+    assert all(source["key"] != "db-infrago-isr" for source in sources)

@@ -1,6 +1,6 @@
 'use client';
 
-import { Layers3, LocateFixed, Satellite } from 'lucide-react';
+import { Crosshair, ExternalLink, Layers3, LocateFixed, Satellite, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import type { LayerGroup, Map as LeafletMap, TileLayer } from 'leaflet';
 
@@ -15,6 +15,8 @@ export type StationMapPoint = {
 };
 
 const FRIEDBERG_CENTER: [number, number] = [50.33269, 8.76126];
+const HESSEN_DOP_WMS = 'https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows';
+const HESSEN_GEODATENVIEWER = 'https://www.geoportal.hessen.de/map?LAYER%5Bzoom%5D=1&LAYER%5Bid%5D=52119&LAYER%5Bvisible%5D=1&LAYER%5Bquerylayer%5D=1';
 const markerColors: Record<string, string> = {
   stop_place: '#d54532',
   platform: '#0b5278',
@@ -35,13 +37,23 @@ function escapeHtml(value: string) {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 }
 
-export function StationMap({ points, onSelect }: { points: StationMapPoint[]; onSelect: (objectKey: string) => void }) {
+export type CoordinateEdit = { objectKey: string; coordinateType: 'start' | 'end'; title: string };
+
+export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, onCoordinateChange, onCancelEdit }: {
+  points: StationMapPoint[];
+  focusObjectKey: string | null;
+  coordinateEdit: CoordinateEdit | null;
+  onSelect: (objectKey: string) => void;
+  onCoordinateChange: (edit: CoordinateEdit, latitude: number, longitude: number) => void;
+  onCancelEdit: () => void;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const markerLayerRef = useRef<LayerGroup | null>(null);
   const satelliteLayerRef = useRef<TileLayer | null>(null);
-  const [satelliteVisible, setSatelliteVisible] = useState(false);
-  const [satelliteOpacity, setSatelliteOpacity] = useState(65);
+  const aerialLayerRef = useRef<TileLayer | null>(null);
+  const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
+  const [imageryOpacity, setImageryOpacity] = useState(65);
   const [mapReady, setMapReady] = useState(false);
 
   useEffect(() => {
@@ -59,10 +71,19 @@ export function StationMap({ points, onSelect }: { points: StationMapPoint[]; on
         opacity: 0,
         attribution: 'Satellitenbild &copy; Esri, Maxar, Earthstar Geographics und weitere',
       }).addTo(map);
+      const aerial = L.tileLayer.wms(HESSEN_DOP_WMS, {
+        layers: 'he_dop20_rgb',
+        format: 'image/png',
+        transparent: true,
+        version: '1.1.1',
+        opacity: 0,
+        attribution: 'Luftbild: &copy; Hessische Verwaltung f&uuml;r Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
+      }).addTo(map);
       const markerLayer = L.layerGroup().addTo(map);
       mapRef.current = map;
       markerLayerRef.current = markerLayer;
       satelliteLayerRef.current = satellite;
+      aerialLayerRef.current = aerial;
       setMapReady(true);
     });
     return () => {
@@ -71,12 +92,14 @@ export function StationMap({ points, onSelect }: { points: StationMapPoint[]; on
       mapRef.current = null;
       markerLayerRef.current = null;
       satelliteLayerRef.current = null;
+      aerialLayerRef.current = null;
     };
   }, []);
 
   useEffect(() => {
-    satelliteLayerRef.current?.setOpacity(satelliteVisible ? satelliteOpacity / 100 : 0);
-  }, [satelliteVisible, satelliteOpacity, mapReady]);
+    satelliteLayerRef.current?.setOpacity(imagery === 'satellite' ? imageryOpacity / 100 : 0);
+    aerialLayerRef.current?.setOpacity(imagery === 'official' ? imageryOpacity / 100 : 0);
+  }, [imagery, imageryOpacity, mapReady]);
 
   useEffect(() => {
     if (!mapReady || !markerLayerRef.current) return;
@@ -86,14 +109,15 @@ export function StationMap({ points, onSelect }: { points: StationMapPoint[]; on
       markerLayerRef.current.clearLayers();
       points.forEach((point) => {
         const endpoint = point.coordinateType !== 'position';
+        const focused = point.objectKey === focusObjectKey;
         const marker = L.circleMarker([point.latitude, point.longitude], {
-          radius: endpoint ? 5 : point.objectType === 'stop_place' ? 9 : 6,
-          color: '#ffffff',
-          weight: 2,
+          radius: focused ? 10 : endpoint ? 5 : point.objectType === 'stop_place' ? 9 : 6,
+          color: focused ? '#f5a623' : '#ffffff',
+          weight: focused ? 4 : 2,
           fillColor: markerColors[point.objectType] ?? '#445b66',
           fillOpacity: 0.96,
         });
-        marker.bindTooltip(escapeHtml(point.title), { direction: 'top', offset: [0, -5] });
+        marker.bindTooltip(escapeHtml(point.title), { direction: 'top', offset: [0, -7], permanent: focused, className: focused ? 'focused-platform-label' : '' });
         marker.bindPopup(`<strong>${escapeHtml(point.title)}</strong><br>${escapeHtml(typeLabels[point.objectType] ?? point.objectType)} · ${coordinateLabels[point.coordinateType]}<br><small>${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}<br>Quelle: OpenStreetMap</small>`);
         marker.on('click', () => onSelect(point.objectKey));
         marker.addTo(markerLayerRef.current!);
@@ -104,25 +128,50 @@ export function StationMap({ points, onSelect }: { points: StationMapPoint[]; on
       }
     });
     return () => { cancelled = true; };
-  }, [mapReady, onSelect, points]);
+  }, [focusObjectKey, mapReady, onSelect, points]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !focusObjectKey) return;
+    const objectPoints = points.filter((point) => point.objectKey === focusObjectKey);
+    if (!objectPoints.length) return;
+    void import('leaflet').then((L) => {
+      if (!mapRef.current) return;
+      const bounds = L.latLngBounds(objectPoints.map((point) => [point.latitude, point.longitude] as [number, number]));
+      mapRef.current.fitBounds(bounds.pad(0.45), { maxZoom: 19, animate: true });
+    });
+  }, [focusObjectKey, mapReady, points]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !coordinateEdit) return;
+    map.getContainer().style.cursor = 'crosshair';
+    const handleClick = (event: { latlng: { lat: number; lng: number } }) => onCoordinateChange(coordinateEdit, event.latlng.lat, event.latlng.lng);
+    map.once('click', handleClick);
+    return () => {
+      map.off('click', handleClick);
+      map.getContainer().style.cursor = '';
+    };
+  }, [coordinateEdit, onCoordinateChange]);
 
   function resetView() {
     mapRef.current?.setView(FRIEDBERG_CENTER, 17);
   }
 
-  return <section className="station-map-card">
+  return <section id="station-map" className="station-map-card">
     <div className="station-map-heading">
-      <div><p className="map-kicker"><LocateFixed size={15}/>Karteneinstieg</p><h2>Bahnhof Friedberg im Lageplan</h2><p>Alle Marker stammen aus gespeicherten OpenStreetMap-Koordinaten. Anklicken für Quelle und Objektbezug.</p></div>
-      <div className="map-summary"><strong>{points.length || '–'}</strong><span>verortete Messpunkte</span></div>
+      <div><p className="map-kicker"><LocateFixed size={15}/>Karteneinstieg</p><h2>Bahnhof Friedberg im Lageplan</h2><p>OSM-Koordinaten auf Satellitenbild prüfen; das amtliche Hessen-DOP ist als zusätzliche Ebene verfügbar.</p></div>
+      <div className="map-heading-actions"><a className="geodata-link" href={HESSEN_GEODATENVIEWER} target="_blank" rel="noreferrer">Geodatenviewer Hessen <ExternalLink size={14}/></a><div className="map-summary"><strong>{points.length || '–'}</strong><span>verortete Messpunkte</span></div></div>
     </div>
     <div className="station-map-wrap">
       <div ref={containerRef} className="station-map" aria-label="Interaktive Karte des Bahnhofs Friedberg mit OpenStreetMap-Messpunkten"/>
       {!mapReady ? <div className="map-loading">Karte wird geladen …</div> : null}
       <div className="map-controls" aria-label="Kartenebenen">
-        <button type="button" className={satelliteVisible ? 'map-toggle map-toggle-active' : 'map-toggle'} aria-pressed={satelliteVisible} onClick={() => setSatelliteVisible((visible) => !visible)}><Satellite size={17}/><span>Satellit</span></button>
-        {satelliteVisible ? <label className="opacity-control"><span>Deckkraft</span><input type="range" min="20" max="100" step="5" value={satelliteOpacity} onChange={(event) => setSatelliteOpacity(Number(event.target.value))}/><strong>{satelliteOpacity}%</strong></label> : null}
+        <button type="button" className={imagery === 'satellite' ? 'map-toggle map-toggle-active' : 'map-toggle'} aria-pressed={imagery === 'satellite'} onClick={() => setImagery((current) => current === 'satellite' ? 'none' : 'satellite')}><Satellite size={17}/><span>Satellit</span></button>
+        <button type="button" className={imagery === 'official' ? 'map-toggle map-toggle-active' : 'map-toggle'} aria-pressed={imagery === 'official'} onClick={() => setImagery((current) => current === 'official' ? 'none' : 'official')}><Layers3 size={17}/><span>Amtliches Luftbild</span></button>
+        {imagery !== 'none' ? <label className="opacity-control"><span>Deckkraft</span><input type="range" min="20" max="100" step="5" value={imageryOpacity} onChange={(event) => setImageryOpacity(Number(event.target.value))}/><strong>{imageryOpacity}%</strong></label> : null}
         <button type="button" className="map-icon-button" aria-label="Bahnhof zentrieren" title="Bahnhof zentrieren" onClick={resetView}><LocateFixed size={18}/></button>
       </div>
+      {coordinateEdit ? <div className="coordinate-edit-banner"><Crosshair size={18}/><span><strong>{coordinateEdit.title}</strong>: neuen {coordinateEdit.coordinateType === 'start' ? 'Anfang' : 'Endpunkt'} in der Karte anklicken</span><button type="button" onClick={onCancelEdit} aria-label="Koordinatenänderung abbrechen"><X size={17}/></button></div> : null}
       <div className="map-legend"><span><i className="legend-station"/>Bahnhof</span><span><i className="legend-platform"/>Bahnsteig</span><span><i className="legend-edge"/>Bahnsteigkante</span><span><i className="legend-entrance"/>Zugang</span><span><i className="legend-equipment"/>Ausstattung</span><span className="legend-source"><Layers3 size={14}/>OSM-Punkte</span></div>
     </div>
   </section>;
