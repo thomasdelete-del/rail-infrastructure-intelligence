@@ -55,12 +55,14 @@ def test_confirms_endpoints_only_when_longitudinal_edges_terminate_there():
 
     result = analyse_platform_crop(
         encoded.tobytes(), bbox,
-        [_geometry_point(40, 40), _geometry_point(160, 40)],
+        [_geometry_point(40, 36), _geometry_point(160, 36)],
+        [_geometry_point(40, 44), _geometry_point(160, 44)],
     )
 
     assert result["status"] == "plausible"
     assert result["start_termination_ratio"] >= 1.18
     assert result["end_termination_ratio"] >= 1.18
+    assert "Bahnsteigkorridor" in result["method"]
 
 
 def test_does_not_infer_full_length_without_visible_local_endpoints():

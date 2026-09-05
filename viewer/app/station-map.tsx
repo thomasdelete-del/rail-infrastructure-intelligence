@@ -208,14 +208,23 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
       const startPoint = original.find((point) => point.coordinateType === 'start')!;
       const endPoint = original.find((point) => point.coordinateType === 'end')!;
       const osmCoordinates: [number, number][] = [[startPoint.latitude, startPoint.longitude], [endPoint.latitude, endPoint.longitude]];
+      const proposed: Array<[number, number] | null> = [analysis?.candidate_start ? [analysis.candidate_start.latitude, analysis.candidate_start.longitude] : null, analysis?.candidate_end ? [analysis.candidate_end.latitude, analysis.candidate_end.longitude] : null];
       if (aerialReviewRequest.coordinateType) {
-        const target = aerialReviewRequest.coordinateType === 'start' ? osmCoordinates[0] : osmCoordinates[1];
+        const endpointIndex = aerialReviewRequest.coordinateType === 'start' ? 0 : 1;
+        if (proposed[0] && proposed[1]) {
+          L.polyline([proposed[0], proposed[1]], { color: '#00a6c7', weight: 6, opacity: .9 }).addTo(reviewLayerRef.current);
+          proposed.forEach((coordinate, index) => {
+            if (!coordinate) return;
+            L.circleMarker(coordinate, { radius: index === endpointIndex ? 10 : 7, color: '#fff', weight: 3, fillColor: '#00a6c7', fillOpacity: 1 }).addTo(reviewLayerRef.current!);
+          });
+        }
+        L.circleMarker(osmCoordinates[endpointIndex], { radius: 7, color: '#f59e0b', weight: 3, fillColor: '#fff', fillOpacity: .2, dashArray: '3 3' }).addTo(reviewLayerRef.current);
+        const target = proposed[endpointIndex] ?? osmCoordinates[endpointIndex];
         mapRef.current.setView(target, 21, { animate: false });
         return;
       }
       L.polyline(osmCoordinates, { color: '#f59e0b', weight: 5, opacity: .95, dashArray: '10 7' }).bindTooltip('OSM-Bahnsteigkante', { permanent: true, direction: 'center', className: 'map-review-label map-review-osm' }).addTo(reviewLayerRef.current);
       const allCoordinates = [...osmCoordinates];
-      const proposed: Array<[number, number] | null> = [analysis?.candidate_start ? [analysis.candidate_start.latitude, analysis.candidate_start.longitude] : null, analysis?.candidate_end ? [analysis.candidate_end.latitude, analysis.candidate_end.longitude] : null];
       if (proposed[0] && proposed[1]) {
         L.polyline([proposed[0], proposed[1]], { color: '#00a6c7', weight: 6, opacity: .95 }).bindTooltip(`Luftbild-Vorschlag${analysis?.candidate_length_m ? ` · ${analysis.candidate_length_m.toFixed(1)} m` : ''}`, { permanent: true, direction: 'center', className: 'map-review-label map-review-proposal' }).addTo(reviewLayerRef.current);
       }

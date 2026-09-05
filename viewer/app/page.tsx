@@ -267,15 +267,11 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, aerialResul
           const candidateConflict = Number.isFinite(dbLength) && dbLength > 0 && result.candidate_length_m !== undefined
             && Math.abs(result.candidate_length_m - dbLength) / dbLength > 0.15;
           if (edge && (comparison(edge)?.level === 'high' || candidateConflict)) {
-            result.status = 'insufficient_evidence';
+            result.status = 'check';
             result.length_conflict = true;
             result.reason = candidateConflict
               ? 'Bildvorschlag verworfen: Die daraus entstehende Länge widerspricht der DB-Nettobaulänge wesentlich'
               : 'Lokaler Bildtreffer verworfen: OSM-Länge und DB-Nettobaulänge widersprechen sich wesentlich';
-            result.candidate_start = undefined;
-            result.candidate_end = undefined;
-            result.start_shift_m = undefined;
-            result.end_shift_m = undefined;
           }
           onAerialResult(track, result);
         } catch {

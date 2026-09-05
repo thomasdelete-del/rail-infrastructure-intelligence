@@ -37,6 +37,7 @@ def analyse_platform_crop(
     image_bytes: bytes,
     bbox: tuple[float, float, float, float],
     geometry: list[dict[str, float]],
+    paired_geometry: list[dict[str, float]] | None = None,
 ) -> dict[str, Any]:
     """Detect long image edges parallel to the OSM platform axis.
 
@@ -77,6 +78,30 @@ def analyse_platform_crop(
     blurred = cv2.GaussianBlur(gray, (7, 7), 0)
     gradient_x = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
     gradient_y = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
+
+    paired_segments: list[tuple[np.ndarray, np.ndarray]] = []
+    if paired_geometry:
+        paired_points = [np.array(_mercator(point["lat"], point["lon"]), dtype=float) for point in paired_geometry]
+        paired_segments = list(zip(paired_points, paired_points[1:]))
+
+    def paired_lateral_offset(point: np.ndarray, normal: np.ndarray) -> float | None:
+        nearest: np.ndarray | None = None
+        nearest_distance = float("inf")
+        for segment_start, segment_end in paired_segments:
+            segment = segment_end - segment_start
+            denominator = float(np.dot(segment, segment))
+            if denominator == 0:
+                continue
+            position = max(0.0, min(1.0, float(np.dot(point - segment_start, segment) / denominator)))
+            projected = segment_start + segment * position
+            distance = float(np.linalg.norm(projected - point))
+            if distance < nearest_distance:
+                nearest, nearest_distance = projected, distance
+        if nearest is None:
+            return None
+        lateral = float(np.dot(nearest - point, normal)) * ground_scale
+        return lateral if 3.0 <= abs(lateral) <= 18.0 else None
+
     def detect_endpoint(origin: np.ndarray, search_axis: np.ndarray, interior_sign: int) -> tuple[np.ndarray, float, float, float] | None:
         local_normal = np.array([-search_axis[1], search_axis[0]])
         origin_px = np.array(xy_to_pixel(origin))
@@ -134,8 +159,10 @@ def analyse_platform_crop(
                                    borderMode=cv2.BORDER_CONSTANT, borderValue=0)
                 return float(np.mean(values))
 
+            corridor_offset = paired_lateral_offset(candidate, local_normal)
+            lateral_sections = (0.0, corridor_offset * 0.5, corridor_offset) if corridor_offset is not None else (-4.0, 0.0, 4.0)
             ratios = []
-            for lateral in (-4.0, 0.0, 4.0):
+            for lateral in lateral_sections:
                 inside = boundary_strength(interior_sign, lateral)
                 outside = boundary_strength(-interior_sign, lateral)
                 ratios.append((inside + 4.0) / (outside + 4.0))
@@ -196,7 +223,7 @@ def analyse_platform_crop(
         "end_confidence": end_confidence,
         "start_termination_ratio": round(start_termination, 2),
         "end_termination_ratio": round(end_termination, 2),
-        "method": "Mehrsignal-Abschlussprüfung: Querabschluss und Abbruch der Bahnsteig-Längskante",
+        "method": "Bahnsteigkorridor-Prüfung: Querabschluss und Abbruch beider seitlichen Begrenzungen",
     }
 
 
@@ -216,7 +243,16 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
         raise LookupError(f"Für Gleis {track} wurde keine eindeutige OSM-Bahnsteigkante gefunden")
     element = candidates[0]
     geometry = element["geometry"]
-    points = [_mercator(point["lat"], point["lon"]) for point in geometry]
+    paired_tracks = {"1": "1a", "1a": "1", "2": "4", "4": "2", "5": "7", "7": "5",
+                     "8": "10", "10": "8", "11": "12", "12": "11"}
+    paired_track = paired_tracks.get(track.casefold())
+    paired_candidates = [candidate for candidate in payload.get("elements", [])
+                         if candidate.get("tags", {}).get("railway") == "platform_edge"
+                         and str(candidate.get("tags", {}).get("ref", "")).casefold() == paired_track
+                         and len(candidate.get("geometry", [])) >= 2]
+    paired_geometry = paired_candidates[0]["geometry"] if len(paired_candidates) == 1 else None
+    all_geometry = geometry + (paired_geometry or [])
+    points = [_mercator(point["lat"], point["lon"]) for point in all_geometry]
     ground_scale = cos(radians(sum(point["lat"] for point in geometry) / len(geometry)))
     margin = 25.0 / ground_scale
     bbox = (min(point[0] for point in points) - margin, min(point[1] for point in points) - margin,
@@ -230,12 +266,13 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=45, follow_redirects=True) as client:
         response = await client.get(WMS_URL, params=params, headers={"User-Agent": "rail-infrastructure-intelligence/1.2"})
         response.raise_for_status()
-    result = analyse_platform_crop(response.content, bbox, geometry)
+    result = analyse_platform_crop(response.content, bbox, geometry, paired_geometry)
     result.update({
         "station": "Friedberg (Hess)", "track": track,
         "osm": {"type": element["type"], "id": element["id"], "url": f"https://www.openstreetmap.org/{element['type']}/{element['id']}"},
         "provenance": {"publisher": "Hessische Verwaltung für Bodenmanagement und Geoinformation",
                        "source": "Geodatenviewer Hessen DOP20", "wms_url": WMS_URL, "layer": WMS_LAYER,
+                       "paired_track_for_corridor": paired_track if paired_geometry else None,
                        "bbox_epsg_3857": [round(value, 2) for value in bbox], "image_size": [width, height]},
         "advisory_only": True,
     })
