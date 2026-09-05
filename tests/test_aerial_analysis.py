@@ -26,7 +26,8 @@ def test_detects_parallel_aerial_edges_and_proposes_longer_extent():
     assert result["candidate_length_m"] > 145
     assert result["length_delta_m"] > 20
     assert result["confidence"] >= 0.5
-    assert result["detected_segments"] >= 2
+    assert abs(result["start_shift_m"]) >= 15
+    assert abs(result["end_shift_m"]) >= 15
 
 
 def test_returns_insufficient_evidence_for_blank_crop():
@@ -43,7 +44,7 @@ def test_returns_insufficient_evidence_for_blank_crop():
     assert result["confidence"] == 0
 
 
-def test_rejects_image_lines_that_are_far_longer_than_db_reference():
+def test_does_not_infer_full_length_without_visible_local_endpoints():
     bbox = (0.0, 0.0, 600.0, 100.0)
     image = np.full((400, 1200, 3), 110, dtype=np.uint8)
     cv2.line(image, (20, 180), (1180, 180), (245, 245, 245), 4)
@@ -54,10 +55,8 @@ def test_rejects_image_lines_that_are_far_longer_than_db_reference():
     result = analyse_platform_crop(
         encoded.tobytes(), bbox,
         [_geometry_point(100, 50), _geometry_point(500, 50)],
-        expected_length_m=250,
     )
 
     assert result["status"] == "insufficient_evidence"
     assert result["confidence"] == 0
-    assert result["rejected_candidate_length_m"] > 500
-    assert "unplausibel" in result["reason"]
+    assert "nicht eindeutig" in result["reason"]

@@ -10,7 +10,6 @@ import httpx
 import numpy as np
 
 from app.collectors.osm import OpenStreetMapCollector, parse_osm_friedberg
-from app.seed.friedberg import FRIEDBERG
 
 
 WMS_URL = "https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows"
@@ -34,16 +33,10 @@ def _latlon(x: float, y: float) -> dict[str, float]:
     }
 
 
-def _angle_difference(first: float, second: float) -> float:
-    value = abs(first - second) % 180
-    return min(value, 180 - value)
-
-
 def analyse_platform_crop(
     image_bytes: bytes,
     bbox: tuple[float, float, float, float],
     geometry: list[dict[str, float]],
-    expected_length_m: float | None = None,
 ) -> dict[str, Any]:
     """Detect long image edges parallel to the OSM platform axis.
 
@@ -64,69 +57,52 @@ def analyse_platform_crop(
     axis /= osm_length
     normal = np.array([-axis[1], axis[0]])
 
-    def pixel_to_xy(px: float, py: float) -> np.ndarray:
-        return np.array([min_x + px / width * (max_x - min_x), max_y - py / height * (max_y - min_y)])
+    def xy_to_pixel(point: np.ndarray) -> tuple[float, float]:
+        return ((point[0] - min_x) / (max_x - min_x) * width,
+                (max_y - point[1]) / (max_y - min_y) * height)
 
-    osm_angle = degrees(np.arctan2(-(end_xy[1] - start_xy[1]), end_xy[0] - start_xy[0])) % 180
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
-    edges = cv2.Canny(cv2.GaussianBlur(gray, (5, 5), 0), 45, 130)
-    lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=42,
-                            minLineLength=max(35, int(min(width, height) * 0.08)), maxLineGap=22)
-    accepted: list[tuple[np.ndarray, np.ndarray, float]] = []
-    midpoint = (start_xy + end_xy) / 2
-    if lines is not None:
-        for raw in lines[:, 0]:
-            x1, y1, x2, y2 = map(float, raw)
-            angle = degrees(np.arctan2(y2 - y1, x2 - x1)) % 180
-            if _angle_difference(angle, osm_angle) > 12:
-                continue
-            first, second = pixel_to_xy(x1, y1), pixel_to_xy(x2, y2)
-            segment_midpoint = (first + second) / 2
-            lateral = abs(float(np.dot(segment_midpoint - midpoint, normal)))
-            length = float(np.linalg.norm(second - first))
-            if lateral <= 18 and length >= 10:
-                accepted.append((first, second, length))
+    blurred = cv2.GaussianBlur(gray, (7, 7), 0)
+    gradient_x = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
+    gradient_y = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
+    start_px, end_px = np.array(xy_to_pixel(start_xy)), np.array(xy_to_pixel(end_xy))
+    pixel_axis = end_px - start_px
+    pixel_axis /= np.linalg.norm(pixel_axis)
+    directional_gradient = np.abs(gradient_x * pixel_axis[0] + gradient_y * pixel_axis[1])
 
-    if len(accepted) < 2:
+    def detect_endpoint(origin: np.ndarray) -> tuple[np.ndarray, float, float] | None:
+        offsets = np.linspace(-35.0, 35.0, 141)
+        lateral_offsets = np.linspace(-5.0, 5.0, 21)
+        scores: list[float] = []
+        for offset in offsets:
+            samples = np.array([xy_to_pixel(origin + axis * offset + normal * lateral) for lateral in lateral_offsets])
+            values = cv2.remap(directional_gradient, samples[:, 0].astype(np.float32).reshape(1, -1),
+                               samples[:, 1].astype(np.float32).reshape(1, -1), cv2.INTER_LINEAR,
+                               borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            scores.append(float(np.mean(values)))
+        smoothed = cv2.GaussianBlur(np.array(scores, dtype=np.float32).reshape(1, -1), (9, 1), 0).ravel()
+        peak_index = int(np.argmax(smoothed))
+        baseline, spread = float(np.median(smoothed)), float(np.std(smoothed))
+        prominence = (float(smoothed[peak_index]) - baseline) / max(spread, 1.0)
+        if prominence < 1.8 or peak_index < 3 or peak_index > len(offsets) - 4:
+            return None
+        shift = float(offsets[peak_index])
+        return origin + axis * shift, shift, prominence
+
+    start_detection, end_detection = detect_endpoint(start_xy), detect_endpoint(end_xy)
+    if not start_detection or not end_detection:
         return {"status": "insufficient_evidence", "confidence": 0.0,
-                "reason": "Zu wenige parallele Luftbildkanten erkannt", "detected_segments": len(accepted)}
-
-    projections = np.array([float(np.dot(point - midpoint, axis)) for first, second, _ in accepted for point in (first, second)])
-    lower, upper = np.percentile(projections, [5, 95])
-    candidate_length = float(upper - lower)
-    if candidate_length < 20:
-        return {"status": "insufficient_evidence", "confidence": 0.0,
-                "reason": "Erkannte Kanten decken den Bahnsteig nicht ausreichend ab", "detected_segments": len(accepted)}
-    if expected_length_m and candidate_length > max(expected_length_m + 100, expected_length_m * 1.5):
-        return {
-            "status": "insufficient_evidence",
-            "confidence": 0.0,
-            "reason": "Erkannte Linien sind im Verhältnis zur DB-Nettobaulänge unplausibel; vermutlich wurden Gleise oder Fahrleitungen erkannt",
-            "rejected_candidate_length_m": round(candidate_length, 1),
-            "reference_net_construction_length_m": expected_length_m,
-            "detected_segments": len(accepted),
-        }
-    if len(accepted) > 120:
-        return {
-            "status": "insufficient_evidence",
-            "confidence": 0.0,
-            "reason": "Zu viele parallele Linien im Bild; Bahnsteigkante kann nicht eindeutig von Gleisen und Fahrleitungen getrennt werden",
-            "rejected_candidate_length_m": round(candidate_length, 1),
-            "detected_segments": len(accepted),
-        }
-
-    candidate_start_xy = midpoint + axis * lower
-    candidate_end_xy = midpoint + axis * upper
-    osm_projection_start = float(np.dot(start_xy - midpoint, axis))
-    osm_projection_end = float(np.dot(end_xy - midpoint, axis))
-    endpoint_shift = max(abs(lower - min(osm_projection_start, osm_projection_end)),
-                         abs(upper - max(osm_projection_start, osm_projection_end)))
+                "reason": "Bahnsteiganfang oder Bahnsteigende ist im lokalen Luftbildausschnitt nicht eindeutig erkennbar",
+                "method": "Lokale Endpunktsuche ±35 m entlang der OSM-Bahnsteigachse"}
+    candidate_start_xy, start_shift, start_prominence = start_detection
+    candidate_end_xy, end_shift, end_prominence = end_detection
+    candidate_length = float(np.linalg.norm(candidate_end_xy - candidate_start_xy))
+    endpoint_shift = max(abs(start_shift), abs(end_shift))
     length_delta = candidate_length - osm_length
-    coverage = min(1.0, sum(item[2] for item in accepted) / max(candidate_length * 2, 1))
-    confidence = round(min(0.95, 0.25 + len(accepted) * 0.035 + coverage * 0.35), 2)
-    status = "plausible" if endpoint_shift <= 5 and abs(length_delta) <= 5 else "check"
-    if endpoint_shift > 15 or abs(length_delta) > 15:
+    confidence = round(min(0.9, min(start_prominence, end_prominence) / 4.5), 2)
+    status = "plausible" if endpoint_shift <= 3 else "check"
+    if endpoint_shift > 10:
         status = "high"
     return {
         "status": status,
@@ -137,8 +113,9 @@ def analyse_platform_crop(
         "osm_chord_length_m": round(osm_length, 1),
         "length_delta_m": round(length_delta, 1),
         "maximum_endpoint_shift_m": round(endpoint_shift, 1),
-        "detected_segments": len(accepted),
-        "method": "OpenCV Canny + probabilistische Hough-Transformation, parallel zur OSM-Achse",
+        "start_shift_m": round(start_shift, 1),
+        "end_shift_m": round(end_shift, 1),
+        "method": "Lokale Endpunktsuche ±35 m entlang der OSM-Bahnsteigachse",
     }
 
 
@@ -171,10 +148,7 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=45, follow_redirects=True) as client:
         response = await client.get(WMS_URL, params=params, headers={"User-Agent": "rail-infrastructure-intelligence/1.2"})
         response.raise_for_status()
-    reference_edge = next((edge for edge in FRIEDBERG["platform_edges"] if edge["track"].casefold() == track.casefold()), None)
-    expected_length = next((float(item["value"]) for item in reference_edge["observations"]
-                            if item["attribute"] == "net_construction_length"), None) if reference_edge else None
-    result = analyse_platform_crop(response.content, bbox, geometry, expected_length)
+    result = analyse_platform_crop(response.content, bbox, geometry)
     result.update({
         "station": "Friedberg (Hess)", "track": track,
         "osm": {"type": element["type"], "id": element["id"], "url": f"https://www.openstreetmap.org/{element['type']}/{element['id']}"},
