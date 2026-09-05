@@ -17,6 +17,7 @@ from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBER
 from app.services.change_report import build_change_report
 from app.services.aerial_analysis import analyse_osm_platform
 from app.services.aerial_learning import store_training_sample
+from app.services.station_identity import resolve_station_identity
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
 app.add_middleware(
@@ -39,6 +40,17 @@ def health(): return {"status": "ok"}
 
 @app.get("/health/database")
 def health_database(): return {"status": "ok" if database_health() else "error"}
+
+@app.get("/stations/resolve-identity")
+async def resolve_identity(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
+    try:
+        return await resolve_station_identity(name, latitude, longitude)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="OSM identity service is temporarily unavailable") from error
 
 @app.get("/stations/friedberg-hess")
 def friedberg():

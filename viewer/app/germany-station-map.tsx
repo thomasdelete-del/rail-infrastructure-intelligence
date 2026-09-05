@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { MapPin, Search, TrainFront } from 'lucide-react';
 import type { Map as LeafletMap, LayerGroup } from 'leaflet';
+const API = 'https://rail-infrastructure-intelligence-production.up.railway.app';
 export type Station = {
   id: string;
   name: string;
@@ -52,6 +53,15 @@ export function SelectedStationMap({
     ? station.name
     : `${station.name} Bahnhof`;
   useEffect(() => {
+    const controller = new AbortController();
+    const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
+    void fetch(`${API}/stations/resolve-identity?${parameters}`, { cache: 'no-store', signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
+      .then((raw: unknown) => { const value = raw as { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); })
+      .catch((error: Error) => { if (error.name !== 'AbortError') setIdentity(null); });
+    return () => controller.abort();
+  }, [station]);
+  useEffect(() => {
     if (!el.current) return;
     let disposed = false;
     let instance: LeafletMap | null = null;
@@ -85,17 +95,6 @@ export function SelectedStationMap({
         if (!response.ok) throw new Error();
         const data = (await response.json()) as { elements: OsmElement[] };
         if (disposed) return;
-        const candidates = data.elements
-          .filter((item) => ['station', 'halt'].includes(item.tags?.railway ?? ''))
-          .map((item) => ({ item, lat: item.lat ?? item.center?.lat, lon: item.lon ?? item.center?.lon }))
-          .filter((item): item is typeof item & { lat: number; lon: number } => item.lat !== undefined && item.lon !== undefined)
-          .sort((a, b) => Math.hypot(a.lat - station.latitude, (a.lon - station.longitude) * 0.65) - Math.hypot(b.lat - station.latitude, (b.lon - station.longitude) * 0.65));
-        const matched = candidates[0]?.item;
-        if (matched) {
-          const tags = matched.tags ?? {};
-          setIdentity({ name: tags.name, eva: tags['ref:ibnr'] ?? tags['ref:IBNR'] ?? tags.uic_ref,
-            ril: tags['railway:ref'], stationNumber: tags['ref:station'], osm: `${matched.type}/${matched.id}` });
-        } else setIdentity(null);
         let platforms = 0,
           entrances = 0,
           equipment = 0;
