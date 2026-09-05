@@ -62,13 +62,15 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
     let cancelled = false;
     void import('leaflet').then((L) => {
       if (cancelled || !containerRef.current) return;
-      const map = L.map(containerRef.current, { zoomControl: true, minZoom: 14, maxZoom: 19 }).setView(FRIEDBERG_CENTER, 17);
+      const map = L.map(containerRef.current, { zoomControl: true, minZoom: 14, maxZoom: 22 }).setView(FRIEDBERG_CENTER, 17);
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
+        maxNativeZoom: 19,
+        maxZoom: 22,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap-Mitwirkende</a>',
       }).addTo(map);
       const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 19,
+        maxNativeZoom: 19,
+        maxZoom: 22,
         opacity: 0,
         attribution: 'Satellitenbild &copy; Esri, Maxar, Earthstar Geographics und weitere',
       }).addTo(map);
@@ -77,6 +79,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
         format: 'image/png',
         transparent: true,
         version: '1.1.1',
+        maxZoom: 22,
         opacity: 0,
         attribution: 'Luftbild: &copy; Hessische Verwaltung f&uuml;r Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
       }).addTo(map);
@@ -139,7 +142,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
     void import('leaflet').then((L) => {
       if (!mapRef.current) return;
       const bounds = L.latLngBounds(objectPoints.map((point) => [point.latitude, point.longitude] as [number, number]));
-      mapRef.current.fitBounds(bounds.pad(0.45), { maxZoom: 19, animate: true });
+      mapRef.current.fitBounds(bounds.pad(0.45), { maxZoom: 22, animate: true });
     });
   }, [focusObjectKey, mapReady, points]);
 
