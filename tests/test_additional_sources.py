@@ -1,5 +1,8 @@
+from datetime import date
+
 from app.collectors.fasta import parse_fasta_facilities
 from app.collectors.osm import ROOT_OBJECT_KEY, parse_osm_friedberg
+from app.collectors.rinf import parse_rinf_platforms
 from app.collectors.stada import parse_stada_station
 
 
@@ -64,3 +67,41 @@ def test_fasta_creates_separate_facility_observations():
     assert len(observations) == 5
     assert {item.object_key for item in observations} == {"FRI-FASTA-4711"}
     assert next(item.value for item in observations if item.attribute == "operational_state") == "ACTIVE"
+
+
+def _rinf_row(platform_id, length, label="Friedberg (Hess)", uopid="DE00FFG"):
+    def value(item):
+        return {"type": "literal", "value": str(item)}
+    return {
+        "opLabel": value(label), "uopid": value(uopid), "platformId": value(platform_id),
+        "length": value(length), "validFrom": value("2026-01-01"), "validTo": value("2026-12-31"),
+        "platform": {"type": "uri", "value": f"http://data.europa.eu/949/platform/{platform_id}"},
+    }
+
+
+def test_rinf_maps_current_usable_lengths_with_strict_identity_and_provenance():
+    payload = {"results": {"bindings": [
+        _rinf_row("8", 250),
+        _rinf_row("8", 250),
+        _rinf_row("1", 999, label="Friedberg (b Augsburg)", uopid="DE0MFDB"),
+        {**_rinf_row("2", 348), "validTo": {"type": "literal", "value": "2025-12-31"}},
+    ]}}
+    observations = parse_rinf_platforms(payload, date(2026, 9, 5))
+    assert len(observations) == 1
+    observation = observations[0]
+    assert observation.object_key == "FRI-PE-8"
+    assert observation.attribute == "usable_length"
+    assert observation.value == 250
+    assert observation.unit == "m"
+    assert observation.source_key == "era-rinf"
+    assert observation.quality_class == "A"
+    assert observation.metadata["uopid"] == "DE00FFG"
+    assert observation.metadata["valid_to"] == "2026-12-31"
+
+
+def test_rinf_preserves_unmatched_platform_without_mapping_it_to_1a():
+    payload = {"results": {"bindings": [_rinf_row("49", 111)]}}
+    observations = parse_rinf_platforms(payload, date(2026, 9, 5))
+    assert {item.attribute for item in observations} == {"name", "usable_length"}
+    assert {item.object_key for item in observations} == {"FRI-RINF-PE-49"}
+    assert all(item.metadata["identity_status"] == "unmatched_platform_id" for item in observations)

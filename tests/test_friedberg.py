@@ -41,4 +41,5 @@ def test_track_55_anomaly_is_not_silently_corrected():
 def test_source_status_uses_free_hessian_geodata_and_no_isr():
     sources = source_status()["sources"]
     assert any(source["key"] == "geoportal-hessen-dop20" and source["configured"] for source in sources)
+    assert any(source["key"] == "era-rinf" and source["configured"] for source in sources)
     assert all(source["key"] != "db-infrago-isr" for source in sources)

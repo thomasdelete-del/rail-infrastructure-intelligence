@@ -6,6 +6,7 @@ from app.collectors.openstation import OpenStationCollector
 from app.collectors.osm import OpenStreetMapCollector
 from app.collectors.stada import StaDaCollector
 from app.collectors.fasta import FaStaCollector
+from app.collectors.rinf import RINFCollector
 from app.database import database_health
 from app.repository import load_infrastructure_inventory, summarize_infrastructure_inventory
 from app.seed.friedberg import FRIEDBERG
@@ -72,6 +73,10 @@ async def openstation_change_report(persist: bool = False):
 async def osm_change_report(persist: bool = False):
     return await build_change_report(OpenStreetMapCollector(), FRIEDBERG["name"], persist=persist)
 
+@app.get("/stations/friedberg-hess/change-report/rinf")
+async def rinf_change_report(persist: bool = False):
+    return await build_change_report(RINFCollector(), FRIEDBERG["name"], persist=persist)
+
 async def _configured_report(collector, persist: bool):
     if not collector.configured:
         raise HTTPException(status_code=503, detail=f"{collector.name} is not configured")
@@ -99,6 +104,7 @@ def source_status():
         {"key": "db-infrago-openstation-netex", "name": "DB InfraGO OpenStation / NeTEx", "configured": True, "quality_class": "A"},
         {"key": "openstreetmap", "name": "OpenStreetMap", "configured": True, "quality_class": "D"},
         {"key": "geoportal-hessen-dop20", "name": "Geodatenviewer Hessen / DOP20", "configured": True, "quality_class": "A"},
+        {"key": "era-rinf", "name": "ERA Infrastrukturregister RINF", "configured": True, "quality_class": "A"},
         {"key": "db-infrago-stada", "name": "DB InfraGO StaDa", "configured": stada.configured, "quality_class": "A"},
         {"key": "db-infrago-fasta", "name": "DB InfraGO FaSta", "configured": fasta.configured, "quality_class": "A"},
     ]}

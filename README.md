@@ -35,6 +35,7 @@ DB InfraGO/OpenStation/StaDa, EBA, federal and Hessian geodata, Stadt Friedberg,
 - DB InfraGO OpenStation / NeTEx (public, authoritative infrastructure inventory)
 - OpenStreetMap via Overpass (public, community geodata; coordinates and nearby mapped infrastructure)
 - Geodatenviewer Hessen DOP20 WMS (official orthophoto overlay, DL-DE Zero 2.0)
+- European Union Agency for Railways RINF knowledge graph (public SPARQL; authoritative platform usable lengths)
 - DB InfraGO StaDa (authoritative master data; set `DB_API_CLIENT_ID` and `DB_API_KEY`)
 - DB InfraGO FaSta (authoritative lift/escalator status; uses the same credentials)
 
