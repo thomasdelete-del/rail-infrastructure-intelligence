@@ -262,6 +262,16 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, aerialResul
           const response = await fetch(`${API}/stations/friedberg-hess/aerial-analysis/osm?track=${encodeURIComponent(track)}`, { cache: 'no-store' });
           if (!response.ok) throw new Error('Luftbildanalyse nicht erreichbar');
           const result = await response.json() as AerialAnalysis;
+          const edge = reference.platform_edges.find((item) => item.track === track);
+          if (edge && comparison(edge)?.level === 'high') {
+            result.status = 'insufficient_evidence';
+            result.length_conflict = true;
+            result.reason = 'Lokaler Bildtreffer verworfen: OSM-Länge und DB-Nettobaulänge widersprechen sich wesentlich';
+            result.candidate_start = undefined;
+            result.candidate_end = undefined;
+            result.start_shift_m = undefined;
+            result.end_shift_m = undefined;
+          }
           onAerialResult(track, result);
         } catch {
           onAerialResult(track, { status: 'insufficient_evidence', confidence: 0, reason: 'Keine eindeutige automatische Auswertung verfügbar', advisory_only: true });
