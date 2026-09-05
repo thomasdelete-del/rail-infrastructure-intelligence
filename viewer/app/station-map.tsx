@@ -40,11 +40,12 @@ function escapeHtml(value: string) {
 
 export type CoordinateEdit = { objectKey: string; coordinateType: 'start' | 'end'; title: string };
 
-export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, onCoordinateChange, onCancelEdit }: {
+export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, onBeginCoordinateEdit, onCoordinateChange, onCancelEdit }: {
   points: StationMapPoint[];
   focusObjectKey: string | null;
   coordinateEdit: CoordinateEdit | null;
   onSelect: (objectKey: string) => void;
+  onBeginCoordinateEdit: (edit: CoordinateEdit) => void;
   onCoordinateChange: (edit: CoordinateEdit, latitude: number, longitude: number) => void;
   onCancelEdit: () => void;
 }) {
@@ -125,6 +126,13 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
         const coordinateLabel = point.objectType === 'platform_edge' && point.coordinateType === 'position' ? 'Gleiskoordinate' : coordinateLabels[point.coordinateType];
         marker.bindPopup(`<strong>${escapeHtml(point.title)}</strong><br>${escapeHtml(typeLabels[point.objectType] ?? point.objectType)} · ${coordinateLabel}<br><small>${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}<br>Quelle: OpenStreetMap</small>`);
         marker.on('click', () => onSelect(point.objectKey));
+        if (point.objectType === 'platform_edge' && point.coordinateType !== 'position') {
+          const coordinateType = point.coordinateType;
+          marker.on('dblclick', () => {
+            onSelect(point.objectKey);
+            onBeginCoordinateEdit({ objectKey: point.objectKey, coordinateType, title: point.title });
+          });
+        }
         marker.addTo(markerLayerRef.current!);
       });
       if (points.length && mapRef.current) {
@@ -133,7 +141,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
       }
     });
     return () => { cancelled = true; };
-  }, [focusObjectKey, mapReady, onSelect, points]);
+  }, [focusObjectKey, mapReady, onBeginCoordinateEdit, onSelect, points]);
 
   useEffect(() => {
     if (!mapReady || !mapRef.current || !focusObjectKey) return;
