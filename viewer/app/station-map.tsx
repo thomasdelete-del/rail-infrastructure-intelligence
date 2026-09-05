@@ -40,14 +40,16 @@ function escapeHtml(value: string) {
 }
 
 export type CoordinateEdit = { objectKey: string; coordinateType: 'start' | 'end'; title: string };
-type AerialReviewAnalysis = { candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; start_shift_m?: number; end_shift_m?: number; maximum_endpoint_shift_m?: number; confidence?: number };
+export type AerialReviewAnalysis = { status: 'plausible' | 'check' | 'high' | 'insufficient_evidence'; confidence: number; reason?: string; candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; start_shift_m?: number; end_shift_m?: number; start_confidence?: number; end_confidence?: number; maximum_endpoint_shift_m?: number; advisory_only: boolean };
 
-export function StationMap({ points, focusObjectKey, coordinateEdit, aerialReviewRequest, onSelect, onBeginCoordinateEdit, onCoordinateChange, onCancelEdit }: {
+export function StationMap({ points, focusObjectKey, coordinateEdit, aerialReviewRequest, aerialResults, onSelect, onNavigateEndpoint, onBeginCoordinateEdit, onCoordinateChange, onCancelEdit }: {
   points: StationMapPoint[];
   focusObjectKey: string | null;
   coordinateEdit: CoordinateEdit | null;
   aerialReviewRequest: { objectKey: string; nonce: number; coordinateType?: 'start' | 'end'; analysis?: AerialReviewAnalysis } | null;
+  aerialResults: Record<string, AerialReviewAnalysis>;
   onSelect: (objectKey: string) => void;
+  onNavigateEndpoint: (objectKey: string, analysis: AerialReviewAnalysis | undefined, coordinateType: 'start' | 'end') => void;
   onBeginCoordinateEdit: (edit: CoordinateEdit) => void;
   onCoordinateChange: (edit: CoordinateEdit, latitude: number, longitude: number) => void;
   onCancelEdit: () => void;
@@ -63,6 +65,20 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [imageryOpacity, setImageryOpacity] = useState(65);
   const [mapReady, setMapReady] = useState(false);
+  const reviewEndpoints = points.filter((point) => point.objectType === 'platform_edge' && (point.coordinateType === 'start' || point.coordinateType === 'end'));
+  const reviewIndex = aerialReviewRequest ? reviewEndpoints.findIndex((point) => point.objectKey === aerialReviewRequest.objectKey && point.coordinateType === aerialReviewRequest.coordinateType) : -1;
+  const currentReviewPoint = reviewIndex >= 0 ? reviewEndpoints[reviewIndex] : null;
+  const currentTrack = currentReviewPoint?.title.replace(/^Gleis\s+/i, '') ?? '';
+  const currentResult = currentTrack ? aerialResults[currentTrack] : undefined;
+  const currentShift = currentReviewPoint?.coordinateType === 'start' ? currentResult?.start_shift_m : currentResult?.end_shift_m;
+  const currentConfidence = currentReviewPoint?.coordinateType === 'start' ? currentResult?.start_confidence : currentResult?.end_confidence;
+  const navigateReview = (direction: -1 | 1) => {
+    if (!reviewEndpoints.length) return;
+    const nextIndex = (Math.max(reviewIndex, 0) + direction + reviewEndpoints.length) % reviewEndpoints.length;
+    const next = reviewEndpoints[nextIndex];
+    const track = next.title.replace(/^Gleis\s+/i, '');
+    onNavigateEndpoint(next.objectKey, aerialResults[track], next.coordinateType as 'start' | 'end');
+  };
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -247,6 +263,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
         <button type="button" className="map-icon-button" aria-label="Bahnhof zentrieren" title="Bahnhof zentrieren" onClick={resetView}><LocateFixed size={18}/></button>
       </div>
       {coordinateEdit ? <div className="coordinate-edit-banner"><Crosshair size={18}/><span><strong>{coordinateEdit.title}</strong>: neuen {coordinateEdit.coordinateType === 'start' ? 'Anfang' : 'Endpunkt'} in der Karte anklicken</span><button type="button" onClick={onCancelEdit} aria-label="Koordinatenänderung abbrechen"><X size={17}/></button></div> : null}
+      {currentReviewPoint ? <div className="endpoint-review-nav"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>{currentReviewPoint.title} · {currentReviewPoint.coordinateType === 'start' ? 'Anfang' : 'Ende'}</strong><span>{currentShift === undefined ? 'Nicht eindeutig bestätigt' : Math.abs(currentShift) <= 3 ? `OSM bestätigt · ${Math.round((currentConfidence ?? 0) * 100)}%` : `Abweichung ${currentShift >= 0 ? '+' : ''}${currentShift.toFixed(1)} m · ${Math.round((currentConfidence ?? 0) * 100)}%`}</span></div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
       <div className="map-legend"><span><i className="legend-station"/>Bahnhof</span><span><i className="legend-platform"/>Bahnsteig</span><span><i className="legend-track-coordinate"/>Gleiskoordinate</span><span><i className="legend-platform-start"/>Bahnsteiganfang</span><span><i className="legend-platform-end"/>Bahnsteigende</span><span><i className="legend-coordinate-draft"/>Aktualisierter Punkt</span><span><i className="legend-entrance"/>Zugang</span><span><i className="legend-equipment"/>Ausstattung</span><span className="legend-source"><Layers3 size={14}/>OSM-Punkte</span></div>
     </div>
   </section>;

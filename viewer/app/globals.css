@@ -198,6 +198,12 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .map-review-proposal { background: #dcf8ff; color: #00677c; }
 .map-review-deviation { background: #ffe9e7; color: #9b2c23; }
 .map-review-confirmed { background: #e5f7ed; color: #176944; }
+.endpoint-review-nav { position: absolute; z-index: 900; right: 14px; bottom: 48px; display: flex; align-items: stretch; overflow: hidden; border: 1px solid #c7d3d8; border-radius: 8px; background: rgb(255 255 255 / .96); box-shadow: 0 3px 12px rgb(7 27 43 / .2); }
+.endpoint-review-nav > button { width: 42px; border: 0; background: #eef5f7; color: #0b5278; font-size: 1.7rem; cursor: pointer; }
+.endpoint-review-nav > button:hover, .endpoint-review-nav > button:focus-visible { background: #dcecf2; outline: none; }
+.endpoint-review-nav > div { display: flex; min-width: 230px; flex-direction: column; justify-content: center; gap: 2px; border-inline: 1px solid #d7e0e4; padding: 8px 12px; }
+.endpoint-review-nav strong { font-size: .78rem; }
+.endpoint-review-nav span { color: #526873; font-size: .72rem; }
 @media (max-width: 640px) { .platform-check-panel { align-items: stretch; flex-direction: column; padding: 14px 18px; } .platform-check-switch { width: 100%; } }
 
 @media (max-width: 520px) { .status-ok { max-width: 34px; overflow: hidden; padding: 8px; } }

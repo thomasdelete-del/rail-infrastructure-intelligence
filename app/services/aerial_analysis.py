@@ -55,7 +55,12 @@ def analyse_platform_crop(
     if osm_length < 1:
         return {"status": "insufficient_evidence", "confidence": 0.0, "reason": "OSM-Achse ist zu kurz"}
     axis /= osm_length
-    normal = np.array([-axis[1], axis[0]])
+    second_xy = np.array(_mercator(geometry[1]["lat"], geometry[1]["lon"]), dtype=float)
+    penultimate_xy = np.array(_mercator(geometry[-2]["lat"], geometry[-2]["lon"]), dtype=float)
+    start_axis = second_xy - start_xy
+    end_axis = end_xy - penultimate_xy
+    start_axis /= np.linalg.norm(start_axis)
+    end_axis /= np.linalg.norm(end_axis)
 
     def xy_to_pixel(point: np.ndarray) -> tuple[float, float]:
         return ((point[0] - min_x) / (max_x - min_x) * width,
@@ -66,58 +71,68 @@ def analyse_platform_crop(
     blurred = cv2.GaussianBlur(gray, (7, 7), 0)
     gradient_x = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
     gradient_y = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
-    start_px, end_px = np.array(xy_to_pixel(start_xy)), np.array(xy_to_pixel(end_xy))
-    pixel_axis = end_px - start_px
-    pixel_axis /= np.linalg.norm(pixel_axis)
-    directional_gradient = np.abs(gradient_x * pixel_axis[0] + gradient_y * pixel_axis[1])
-
-    def detect_endpoint(origin: np.ndarray) -> tuple[np.ndarray, float, float] | None:
+    def detect_endpoint(origin: np.ndarray, search_axis: np.ndarray) -> tuple[np.ndarray, float, float] | None:
+        local_normal = np.array([-search_axis[1], search_axis[0]])
+        origin_px = np.array(xy_to_pixel(origin))
+        direction_px = np.array(xy_to_pixel(origin + search_axis)) - origin_px
+        direction_px /= np.linalg.norm(direction_px)
+        directional_gradient = np.abs(gradient_x * direction_px[0] + gradient_y * direction_px[1])
         offsets = np.linspace(-35.0, 35.0, 141)
-        lateral_offsets = np.linspace(-5.0, 5.0, 21)
+        lateral_offsets = np.linspace(-6.0, 6.0, 25)
         scores: list[float] = []
         for offset in offsets:
-            samples = np.array([xy_to_pixel(origin + axis * offset + normal * lateral) for lateral in lateral_offsets])
+            samples = np.array([xy_to_pixel(origin + search_axis * offset + local_normal * lateral) for lateral in lateral_offsets])
             values = cv2.remap(directional_gradient, samples[:, 0].astype(np.float32).reshape(1, -1),
                                samples[:, 1].astype(np.float32).reshape(1, -1), cv2.INTER_LINEAR,
                                borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-            scores.append(float(np.mean(values)))
+            halfway = values.shape[1] // 2
+            scores.append(max(float(np.mean(values[:, :halfway + 1])),
+                              float(np.mean(values[:, halfway:]))))
         smoothed = cv2.GaussianBlur(np.array(scores, dtype=np.float32).reshape(1, -1), (9, 1), 0).ravel()
         baseline, spread = float(np.median(smoothed)), float(np.std(smoothed))
         zero_indices = np.flatnonzero(np.abs(offsets) <= 3.0)
         near_index = int(zero_indices[np.argmax(smoothed[zero_indices])])
         global_index = int(np.argmax(smoothed))
         near_prominence = (float(smoothed[near_index]) - baseline) / max(spread, 1.0)
-        global_score = max(float(smoothed[global_index]), 1.0)
         # A visible terminating edge at the existing OSM point is stronger evidence
         # than a more contrast-rich object elsewhere in the search window.
-        if near_prominence >= 0.75 and float(smoothed[near_index]) >= global_score * 0.42:
+        if near_prominence >= 1.0:
             peak_index, prominence = near_index, near_prominence
         else:
             peak_index = global_index
             prominence = (float(smoothed[peak_index]) - baseline) / max(spread, 1.0)
         shift = float(offsets[peak_index])
-        if prominence < 2.7 or abs(shift) > 8 or peak_index < 3 or peak_index > len(offsets) - 4:
+        required_prominence = 1.4 if abs(shift) <= 3 else 2.7
+        if prominence < required_prominence or abs(shift) > 8 or peak_index < 3 or peak_index > len(offsets) - 4:
             return None
-        return origin + axis * shift, shift, prominence
+        return origin + search_axis * shift, shift, prominence
 
-    start_detection, end_detection = detect_endpoint(start_xy), detect_endpoint(end_xy)
+    start_detection = detect_endpoint(start_xy, start_axis)
+    end_detection = detect_endpoint(end_xy, end_axis)
+    def endpoint_confidence(detection: tuple[np.ndarray, float, float]) -> float:
+        _, shift, prominence = detection
+        osm_prior = 0.45 if abs(shift) <= 3 else 0.0
+        return round(min(0.9, osm_prior + prominence / 6), 2)
+
     if not start_detection or not end_detection:
         result: dict[str, Any] = {"status": "insufficient_evidence", "confidence": 0.0,
                                   "reason": "Nur einer oder keiner der beiden OSM-Endpunkte ist im Luftbild eindeutig bestätigt",
                                   "method": "OSM-zentrierte lokale Endpunktprüfung; Anfang und Ende getrennt"}
         if start_detection:
             result.update(candidate_start=_latlon(*start_detection[0]), start_shift_m=round(start_detection[1], 1),
-                          start_confidence=round(min(0.9, start_detection[2] / 4.5), 2))
+                          start_confidence=endpoint_confidence(start_detection))
         if end_detection:
             result.update(candidate_end=_latlon(*end_detection[0]), end_shift_m=round(end_detection[1], 1),
-                          end_confidence=round(min(0.9, end_detection[2] / 4.5), 2))
+                          end_confidence=endpoint_confidence(end_detection))
         return result
     candidate_start_xy, start_shift, start_prominence = start_detection
     candidate_end_xy, end_shift, end_prominence = end_detection
     candidate_length = float(np.linalg.norm(candidate_end_xy - candidate_start_xy))
     endpoint_shift = max(abs(start_shift), abs(end_shift))
     length_delta = candidate_length - osm_length
-    confidence = round(min(0.9, min(start_prominence, end_prominence) / 4.5), 2)
+    start_confidence = endpoint_confidence(start_detection)
+    end_confidence = endpoint_confidence(end_detection)
+    confidence = min(start_confidence, end_confidence)
     status = "plausible" if endpoint_shift <= 3 else "check"
     return {
         "status": status,
@@ -130,8 +145,8 @@ def analyse_platform_crop(
         "maximum_endpoint_shift_m": round(endpoint_shift, 1),
         "start_shift_m": round(start_shift, 1),
         "end_shift_m": round(end_shift, 1),
-        "start_confidence": round(min(0.9, start_prominence / 4.5), 2),
-        "end_confidence": round(min(0.9, end_prominence / 4.5), 2),
+        "start_confidence": start_confidence,
+        "end_confidence": end_confidence,
         "method": "Lokale Endpunktsuche ±35 m entlang der OSM-Bahnsteigachse",
     }
 
