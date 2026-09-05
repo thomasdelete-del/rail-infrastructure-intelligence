@@ -198,11 +198,11 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
   const usableLengthCell = (edge: ReferenceEdge) => {
     const rinf = rinfValue(edge);
     if (!rinf) return <div className="data-value"><span className="data-missing">Nicht in RINF zugeordnet</span><span>{edge.track === '1a' ? 'Gleis 49 bleibt separat' : 'ERA RINF'}</span></div>;
-    const osmLength = Number(osmValue(edge, 'construction_length')?.value);
+    const netLength = Number(value(edge, 'net_construction_length')?.value);
     const rinfLength = Number(rinf.value);
-    const delta = osmLength - rinfLength;
-    const suspicious = Number.isFinite(delta) && Math.abs(delta) > 10;
-    return <div className="data-value"><strong>{format(rinf)}</strong><span>ERA RINF · gültig 2026</span>{suspicious ? <span className="automatic-check">Prüfvorschlag: OSM {delta < 0 ? `${Math.abs(delta).toFixed(1)} m zu kurz` : `${delta.toFixed(1)} m länger`}</span> : <span className="automatic-ok">OSM-Länge plausibel</span>}</div>;
+    const shorterBy = netLength - rinfLength;
+    const needsReview = Number.isFinite(shorterBy) && shorterBy > 0 && shorterBy < 5;
+    return <div className="data-value"><strong>{format(rinf)}</strong><span>ERA RINF · gültig 2026</span>{needsReview ? <span className="automatic-check">Prüfvorschlag: nur {shorterBy.toFixed(1)} m kürzer als Nettobaulänge</span> : null}</div>;
   };
   const coordinateCell = (edge: ReferenceEdge, coordinateType: 'start' | 'end') => {
     const attribute = coordinateType === 'start' ? 'start_coordinates' : 'end_coordinates';
@@ -217,7 +217,7 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
       {reference?.platform_edges.map((edge) => { const deviation = comparison(edge); return <tr key={edge.object_id} className={deviation?.level === 'high' ? 'row-deviation-high' : undefined}><td><button type="button" className="track-pill track-focus" onClick={() => onFocus(edge.object_id)}>Gleis {edge.track}</button></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td>{osmGeometryCell(edge)}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{deviation ? <button type="button" className={`deviation deviation-${deviation.level} deviation-button`} onClick={() => onFocus(edge.object_id)} title="Auf der Karte anzeigen"><strong>{deviation.delta >= 0 ? '+' : ''}{deviation.delta.toFixed(1)} m</strong><span>{deviation.percent.toFixed(1)}% · {deviation.level === 'low' ? 'gering' : deviation.level === 'check' ? 'prüfen' : 'auffällig'}</span></button> : <span className="data-missing">Nicht vergleichbar</span>}</td><td>{usableLengthCell(edge)}</td><td>{coordinateCell(edge, 'start')}</td><td>{coordinateCell(edge, 'end')}</td></tr>; })}
       {!reference ? Array.from({ length: 4 }, (_, index) => <tr key={index}><td colSpan={8}><div className="h-8 animate-pulse rounded bg-muted"/></td></tr>) : null}
     </tbody></table></div>
-    <div className="platform-data-note"><AlertTriangle size={16}/><p>Automatische Prüfvorschläge vergleichen OSM-Geometrie mit der RINF-Nutzlänge. Sie ändern keine Koordinate: Zur Kontrolle auf den Hinweis springen, Satellit oder amtliches Luftbild einschalten und Anfang/Ende manuell als separaten Vorschlag setzen. Gleis 49 wird nicht als 1a übernommen.</p></div>
+    <div className="platform-data-note"><AlertTriangle size={16}/><p>Ein Nutzlängen-Prüfvorschlag erscheint ausschließlich, wenn die RINF-Nutzlänge weniger als 5,0 m unter der DB-Nettobaulänge liegt. Er ändert keine Quelle. Gleis 49 wird nicht als 1a übernommen.</p></div>
   </section>;
 }
 
