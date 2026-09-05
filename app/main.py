@@ -6,6 +6,7 @@ from app.collectors.openstation import OpenStationCollector
 from app.collectors.osm import OpenStreetMapCollector
 from app.collectors.stada import StaDaCollector
 from app.collectors.fasta import FaStaCollector
+from app.collectors.isr import ISRCollector
 from app.database import database_health
 from app.repository import load_infrastructure_inventory, summarize_infrastructure_inventory
 from app.seed.friedberg import FRIEDBERG
@@ -92,12 +93,17 @@ async def stada_change_report(persist: bool = False):
 async def fasta_change_report(persist: bool = False):
     return await _configured_report(FaStaCollector(), persist)
 
+@app.get("/stations/friedberg-hess/change-report/isr")
+async def isr_change_report(persist: bool = False):
+    return await _configured_report(ISRCollector(), persist)
+
 @app.get("/stations/friedberg-hess/source-status")
 def source_status():
-    stada, fasta = StaDaCollector(), FaStaCollector()
+    stada, fasta, isr = StaDaCollector(), FaStaCollector(), ISRCollector()
     return {"station": FRIEDBERG["name"], "sources": [
         {"key": "db-infrago-openstation-netex", "name": "DB InfraGO OpenStation / NeTEx", "configured": True, "quality_class": "A"},
         {"key": "openstreetmap", "name": "OpenStreetMap", "configured": True, "quality_class": "D"},
+        {"key": "db-infrago-isr", "name": "DB InfraGO ISR Data Service", "configured": isr.configured, "quality_class": "A"},
         {"key": "db-infrago-stada", "name": "DB InfraGO StaDa", "configured": stada.configured, "quality_class": "A"},
         {"key": "db-infrago-fasta", "name": "DB InfraGO FaSta", "configured": fasta.configured, "quality_class": "A"},
     ]}

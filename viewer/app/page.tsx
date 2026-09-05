@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronRight, Database, ExternalLink, Filter, MapPinOff, RefreshCw, Search, ShieldCheck, TrainFront, X } from 'lucide-react';
+import { StationMap, type StationMapPoint } from './station-map';
 
 const API = 'https://rail-infrastructure-intelligence-production.up.railway.app';
 type Evidence = { attribute: string; value: unknown; unit: string | null; source_key: string; provenance?: Record<string, unknown> };
@@ -16,6 +17,12 @@ type ReferenceStation = { platform_edges: ReferenceEdge[]; sources: { id: string
 function currentValue(object: InfraObject, attribute: string) {
   const values = object.observations.filter((item) => item.attribute === attribute);
   return values.length ? String(values.at(-1)?.value ?? '') : null;
+}
+
+function numericValue(object: InfraObject, attribute: string) {
+  const observation = object.observations.filter((item) => item.source_key === 'openstreetmap' && item.attribute === attribute).at(-1);
+  const value = Number(observation?.value);
+  return Number.isFinite(value) ? value : null;
 }
 
 const equipmentLabels: Record<string, string> = { PassengerInformationEquipment: 'Fahrgastinformation', ShelterEquipment: 'Wetterschutz', StaircaseEquipment: 'Treppen', LiftEquipment: 'Aufzüge' };
@@ -50,7 +57,7 @@ export default function Home() {
         fetch(`${API}/stations/friedberg-hess`, { cache: 'no-store' }),
       ]);
       if (!stateResponse.ok || !inventoryResponse.ok || !sourceResponse.ok || !referenceResponse.ok) throw new Error('API unavailable');
-      const sourceData = await sourceResponse.json();
+      const sourceData = await sourceResponse.json() as { sources: SourceStatus[] };
       setState(await stateResponse.json()); setInventory(await inventoryResponse.json()); setSources(sourceData.sources); setReference(await referenceResponse.json()); setUpdated(new Date());
     } catch { setError(true); } finally { setRefreshing(false); }
   }
@@ -73,6 +80,24 @@ export default function Home() {
         .some((value) => value.toLocaleLowerCase('de-DE').includes(needle));
     });
   }, [inventory, query, typeFilter]);
+  const mapPoints = useMemo<StationMapPoint[]>(() => {
+    if (!inventory) return [];
+    const points: StationMapPoint[] = [];
+    inventory.objects.forEach((item) => {
+      const title = currentValue(item, 'name') ?? equipmentLabels[currentValue(item, 'equipment_type') ?? ''] ?? typeLabels[item.object_type] ?? item.object_type;
+      const latitude = numericValue(item, 'latitude');
+      const longitude = numericValue(item, 'longitude');
+      if (latitude !== null && longitude !== null) points.push({ id: `${item.object_key}:position`, objectKey: item.object_key, latitude, longitude, title, objectType: item.object_type, coordinateType: 'position' });
+      (['start_coordinates', 'end_coordinates'] as const).forEach((attribute) => {
+        const observation = item.observations.filter((entry) => entry.source_key === 'openstreetmap' && entry.attribute === attribute).at(-1);
+        const coordinate = observation?.value as { latitude?: unknown; longitude?: unknown } | undefined;
+        const pointLatitude = Number(coordinate?.latitude);
+        const pointLongitude = Number(coordinate?.longitude);
+        if (Number.isFinite(pointLatitude) && Number.isFinite(pointLongitude)) points.push({ id: `${item.object_key}:${attribute}`, objectKey: item.object_key, latitude: pointLatitude, longitude: pointLongitude, title, objectType: item.object_type, coordinateType: attribute === 'start_coordinates' ? 'start' : 'end' });
+      });
+    });
+    return points;
+  }, [inventory]);
   const selectedObject = inventory?.objects.find((item) => item.object_key === selectedKey) ?? filteredObjects[0] ?? null;
 
   return <main className="min-h-screen bg-background text-foreground">
@@ -83,6 +108,7 @@ export default function Home() {
     <div className="mx-auto max-w-[1440px] px-5 py-7 lg:px-10 lg:py-10">
       <section className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p className="mb-2 text-sm font-semibold uppercase tracking-[0.16em] text-[#b25b18]">Infrastruktur-Viewer</p><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Friedberg (Hess)</h1><p className="mt-2 text-base text-muted-foreground">Quellenbelegter Ist-Zustand aus mehreren unabhängigen Datenquellen</p></div><div className="flex items-center gap-2 text-sm text-muted-foreground"><Database size={16}/>{updated ? `Abgerufen ${updated.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}` : 'Live-Daten werden geladen'}</div></section>
       {error ? <section className="mb-7 rounded-lg border border-red-300 bg-red-50 p-5 text-red-900"><p className="font-semibold">Datenquelle momentan nicht erreichbar</p><p className="mt-1 text-sm">Bitte in einigen Sekunden erneut aktualisieren.</p></section> : null}
+      <StationMap points={mapPoints} onSelect={setSelectedKey}/>
       <section className="mb-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Infrastrukturobjekte" value={state?.object_count} accent="navy"/><Metric label="Bahnsteigkanten" value={state?.object_types.platform_edge} accent="orange"/><Metric label="Ausstattung" value={state?.object_types.equipment} accent="steel"/><Metric label="Aktuelle Konflikte" value={state?.conflict_count} accent="green"/></section>
       <section className="mb-7 rounded-xl border border-border bg-card shadow-sm"><div className="flex flex-col justify-between gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:px-6"><div><h2 className="text-lg font-bold">Datenquellen</h2><p className="mt-1 text-sm text-muted-foreground">Aktive Verbindungen und Qualitätsklasse</p></div><span className="text-sm font-semibold text-[#176944]">{sources.filter((source) => source.configured).length} von {sources.length || 4} verbunden</span></div><div className="source-grid">{sources.map((source) => <div className="source-row" key={source.key}><span className={`source-indicator ${source.configured ? 'source-active' : 'source-pending'}`}/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{source.name}</p><p className="mt-1 text-xs text-muted-foreground">Qualitätsklasse {source.quality_class}</p></div><span className={source.configured ? 'source-state-active' : 'source-state-pending'}>{source.configured ? 'Aktiv' : 'Zugang fehlt'}</span></div>)}</div></section>
       <div className="grid gap-7 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.75fr)]">
@@ -128,10 +154,10 @@ function PlatformDataTable({ reference, inventory }: { reference: ReferenceStati
   return <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
     <div className="flex flex-col justify-between gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten je Gleis</h2><p className="mt-1 text-sm text-muted-foreground">Maße und Geokoordinaten mit klarer Kennzeichnung fehlender Quelldaten</p></div><span className="text-xs font-semibold text-muted-foreground">DB InfraGO · Stand 17.08.2026</span></div>
     <div className="platform-data-scroll"><table className="platform-data-table"><thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge</th><th>Nettobaulänge</th><th>Nutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead><tbody>
-      {reference?.platform_edges.map((edge) => <tr key={edge.object_id}><td><span className="track-pill">Gleis {edge.track}</span></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td>{cell(osmValue(edge, 'construction_length'), 'OSM · berechnet')}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{cell(value(edge, 'usable_length'), 'DB InfraGO')}</td><td>{cell(osmValue(edge, 'start_coordinates'), 'OSM')}</td><td>{cell(osmValue(edge, 'end_coordinates'), 'OSM')}</td></tr>)}
+      {reference?.platform_edges.map((edge) => <tr key={edge.object_id}><td><span className="track-pill">Gleis {edge.track}</span></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td>{cell(osmValue(edge, 'construction_length'), 'OSM · berechnet')}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{value(edge, 'usable_length') ? cell(value(edge, 'usable_length'), 'DB InfraGO ISR') : <div className="data-value"><span className="data-missing">ISR-Zugang erforderlich</span><span>DB InfraGO ISR</span></div>}</td><td>{cell(osmValue(edge, 'start_coordinates'), 'OSM')}</td><td>{cell(osmValue(edge, 'end_coordinates'), 'OSM')}</td></tr>)}
       {!reference ? Array.from({ length: 4 }, (_, index) => <tr key={index}><td colSpan={7}><div className="h-8 animate-pulse rounded bg-muted"/></td></tr>) : null}
     </tbody></table></div>
-    <div className="platform-data-note"><AlertTriangle size={16}/><p>Die Nettobaulänge ist laut DB nicht als Zugnutzlänge geeignet. Anfangs- und Endkoordinaten werden nicht aus einem Mittelpunkt abgeleitet.</p></div>
+    <div className="platform-data-note"><AlertTriangle size={16}/><p>Die betriebliche Bahnsteignutzlänge wird im kostenpflichtigen ISR Data Service geführt; sie wird erst nach freigeschaltetem Produktzugang übernommen. Die Nettobaulänge ersetzt sie nicht.</p></div>
   </section>;
 }
 

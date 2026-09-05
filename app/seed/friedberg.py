@@ -42,7 +42,7 @@ FRIEDBERG = {
     ],
     "projects": [], "geometries": [], "conflicts": [],
     "data_gaps": [
-        "Authoritative usable platform lengths for train-length planning",
+        "ISR Data Service access for authoritative usable platform lengths",
         "Platform and roof geometries", "Current detailed track topology",
         "Elevator/stair/underpass object inventory and geometry",
         "Current and planned overhead-line geometry",

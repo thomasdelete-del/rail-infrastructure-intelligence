@@ -1,6 +1,7 @@
 from app.identity import is_friedberg_hess
 from app.seed.friedberg import FRIEDBERG
 from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACK_CONFLICTS
+from app.main import source_status
 
 
 def test_station_identity():
@@ -35,3 +36,12 @@ def test_track_55_anomaly_is_not_silently_corrected():
     assert conflict["object_id"] == "FRI-SERVICE-TRACK-55"
     assert conflict["published_value"] == 730
     assert conflict["status"] == "needs_verification"
+
+
+def test_isr_is_listed_as_authoritative_source(monkeypatch):
+    monkeypatch.delenv("DB_API_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DB_API_KEY", raising=False)
+    isr = next(source for source in source_status()["sources"] if source["key"] == "db-infrago-isr")
+    assert isr["quality_class"] == "A"
+    assert isr["configured"] is False
+    assert any("ISR Data Service" in gap for gap in FRIEDBERG["data_gaps"])

@@ -35,6 +35,7 @@ DB InfraGO/OpenStation/StaDa, EBA, federal and Hessian geodata, Stadt Friedberg,
 - DB InfraGO OpenStation / NeTEx (public, authoritative infrastructure inventory)
 - OpenStreetMap via Overpass (public, community geodata; coordinates and nearby mapped infrastructure)
 - DB InfraGO StaDa (authoritative master data; set `DB_API_CLIENT_ID` and `DB_API_KEY`)
+- DB InfraGO ISR Data Service (authoritative operational platform usable lengths; same credentials with an active ISR product subscription)
 - DB InfraGO FaSta (authoritative lift/escalator status; uses the same credentials)
 
 Each source has an independent change-report endpoint below
