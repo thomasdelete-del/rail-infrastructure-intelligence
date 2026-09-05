@@ -210,7 +210,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
       const osmCoordinates: [number, number][] = [[startPoint.latitude, startPoint.longitude], [endPoint.latitude, endPoint.longitude]];
       if (aerialReviewRequest.coordinateType) {
         const target = aerialReviewRequest.coordinateType === 'start' ? osmCoordinates[0] : osmCoordinates[1];
-        mapRef.current.setView(target, 21, { animate: true });
+        mapRef.current.setView(target, 21, { animate: false });
         return;
       }
       L.polyline(osmCoordinates, { color: '#f59e0b', weight: 5, opacity: .95, dashArray: '10 7' }).bindTooltip('OSM-Bahnsteigkante', { permanent: true, direction: 'center', className: 'map-review-label map-review-osm' }).addTo(reviewLayerRef.current);

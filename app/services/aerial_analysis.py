@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from math import atan, degrees, exp, log, pi, radians
+from math import atan, cos, degrees, exp, log, pi, radians
 from time import monotonic
 from typing import Any
 
@@ -48,13 +48,19 @@ def analyse_platform_crop(
 
     height, width = image.shape[:2]
     min_x, min_y, max_x, max_y = bbox
+    # EPSG:3857 is conformal but its scale is enlarged by sec(latitude).
+    # Keep WMS coordinates in Web Mercator and convert every analysed distance
+    # back to local ground metres. At Friedberg the otherwise resulting error
+    # is roughly +57 percent.
+    ground_scale = cos(radians(sum(point["lat"] for point in geometry) / len(geometry)))
     start_xy = np.array(_mercator(geometry[0]["lat"], geometry[0]["lon"]), dtype=float)
     end_xy = np.array(_mercator(geometry[-1]["lat"], geometry[-1]["lon"]), dtype=float)
     axis = end_xy - start_xy
-    osm_length = float(np.linalg.norm(axis))
+    mercator_length = float(np.linalg.norm(axis))
+    osm_length = mercator_length * ground_scale
     if osm_length < 1:
         return {"status": "insufficient_evidence", "confidence": 0.0, "reason": "OSM-Achse ist zu kurz"}
-    axis /= osm_length
+    axis /= mercator_length
     second_xy = np.array(_mercator(geometry[1]["lat"], geometry[1]["lon"]), dtype=float)
     penultimate_xy = np.array(_mercator(geometry[-2]["lat"], geometry[-2]["lon"]), dtype=float)
     start_axis = second_xy - start_xy
@@ -81,7 +87,10 @@ def analyse_platform_crop(
         lateral_offsets = np.linspace(-6.0, 6.0, 25)
         scores: list[float] = []
         for offset in offsets:
-            samples = np.array([xy_to_pixel(origin + search_axis * offset + local_normal * lateral) for lateral in lateral_offsets])
+            samples = np.array([
+                xy_to_pixel(origin + search_axis * (offset / ground_scale) + local_normal * (lateral / ground_scale))
+                for lateral in lateral_offsets
+            ])
             values = cv2.remap(directional_gradient, samples[:, 0].astype(np.float32).reshape(1, -1),
                                samples[:, 1].astype(np.float32).reshape(1, -1), cv2.INTER_LINEAR,
                                borderMode=cv2.BORDER_CONSTANT, borderValue=0)
@@ -105,7 +114,7 @@ def analyse_platform_crop(
         required_prominence = 1.4 if abs(shift) <= 3 else 2.7
         if prominence < required_prominence or abs(shift) > 8 or peak_index < 3 or peak_index > len(offsets) - 4:
             return None
-        return origin + search_axis * shift, shift, prominence
+        return origin + search_axis * (shift / ground_scale), shift, prominence
 
     start_detection = detect_endpoint(start_xy, start_axis)
     end_detection = detect_endpoint(end_xy, end_axis)
@@ -127,7 +136,7 @@ def analyse_platform_crop(
         return result
     candidate_start_xy, start_shift, start_prominence = start_detection
     candidate_end_xy, end_shift, end_prominence = end_detection
-    candidate_length = float(np.linalg.norm(candidate_end_xy - candidate_start_xy))
+    candidate_length = float(np.linalg.norm(candidate_end_xy - candidate_start_xy)) * ground_scale
     endpoint_shift = max(abs(start_shift), abs(end_shift))
     length_delta = candidate_length - osm_length
     start_confidence = endpoint_confidence(start_detection)
@@ -168,7 +177,8 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
     element = candidates[0]
     geometry = element["geometry"]
     points = [_mercator(point["lat"], point["lon"]) for point in geometry]
-    margin = 25.0
+    ground_scale = cos(radians(sum(point["lat"] for point in geometry) / len(geometry)))
+    margin = 25.0 / ground_scale
     bbox = (min(point[0] for point in points) - margin, min(point[1] for point in points) - margin,
             max(point[0] for point in points) + margin, max(point[1] for point in points) + margin)
     span_x, span_y = bbox[2] - bbox[0], bbox[3] - bbox[1]
