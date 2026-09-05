@@ -32,6 +32,7 @@ const typeLabels: Record<string, string> = {
   equipment: 'Ausstattung',
 };
 const coordinateLabels = { position: 'OSM-Position', start: 'Bahnsteiganfang', end: 'Bahnsteigende' };
+const platformCoordinateColors = { position: '#1873a5', start: '#20a464', end: '#d54532' };
 
 function escapeHtml(value: string) {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#039;');
@@ -114,11 +115,12 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
           radius: focused ? 10 : endpoint ? 5 : point.objectType === 'stop_place' ? 9 : 6,
           color: focused ? '#f5a623' : '#ffffff',
           weight: focused ? 4 : 2,
-          fillColor: markerColors[point.objectType] ?? '#445b66',
+          fillColor: point.objectType === 'platform_edge' ? platformCoordinateColors[point.coordinateType] : markerColors[point.objectType] ?? '#445b66',
           fillOpacity: 0.96,
         });
         marker.bindTooltip(escapeHtml(point.title), { direction: 'top', offset: [0, -7], permanent: focused, className: focused ? 'focused-platform-label' : '' });
-        marker.bindPopup(`<strong>${escapeHtml(point.title)}</strong><br>${escapeHtml(typeLabels[point.objectType] ?? point.objectType)} · ${coordinateLabels[point.coordinateType]}<br><small>${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}<br>Quelle: OpenStreetMap</small>`);
+        const coordinateLabel = point.objectType === 'platform_edge' && point.coordinateType === 'position' ? 'Gleiskoordinate' : coordinateLabels[point.coordinateType];
+        marker.bindPopup(`<strong>${escapeHtml(point.title)}</strong><br>${escapeHtml(typeLabels[point.objectType] ?? point.objectType)} · ${coordinateLabel}<br><small>${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}<br>Quelle: OpenStreetMap</small>`);
         marker.on('click', () => onSelect(point.objectKey));
         marker.addTo(markerLayerRef.current!);
       });
@@ -172,7 +174,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
         <button type="button" className="map-icon-button" aria-label="Bahnhof zentrieren" title="Bahnhof zentrieren" onClick={resetView}><LocateFixed size={18}/></button>
       </div>
       {coordinateEdit ? <div className="coordinate-edit-banner"><Crosshair size={18}/><span><strong>{coordinateEdit.title}</strong>: neuen {coordinateEdit.coordinateType === 'start' ? 'Anfang' : 'Endpunkt'} in der Karte anklicken</span><button type="button" onClick={onCancelEdit} aria-label="Koordinatenänderung abbrechen"><X size={17}/></button></div> : null}
-      <div className="map-legend"><span><i className="legend-station"/>Bahnhof</span><span><i className="legend-platform"/>Bahnsteig</span><span><i className="legend-edge"/>Bahnsteigkante</span><span><i className="legend-entrance"/>Zugang</span><span><i className="legend-equipment"/>Ausstattung</span><span className="legend-source"><Layers3 size={14}/>OSM-Punkte</span></div>
+      <div className="map-legend"><span><i className="legend-station"/>Bahnhof</span><span><i className="legend-platform"/>Bahnsteig</span><span><i className="legend-track-coordinate"/>Gleiskoordinate</span><span><i className="legend-platform-start"/>Bahnsteiganfang</span><span><i className="legend-platform-end"/>Bahnsteigende</span><span><i className="legend-entrance"/>Zugang</span><span><i className="legend-equipment"/>Ausstattung</span><span className="legend-source"><Layers3 size={14}/>OSM-Punkte</span></div>
     </div>
   </section>;
 }

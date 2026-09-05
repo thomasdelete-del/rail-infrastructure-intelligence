@@ -57,7 +57,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .map-legend { position: absolute; z-index: 500; bottom: 28px; left: 14px; display: flex; flex-wrap: wrap; gap: 9px 13px; max-width: calc(100% - 28px); border-radius: 8px; background: rgb(7 27 43 / 91%); padding: 9px 12px; color: white; box-shadow: 0 2px 12px rgb(7 27 43 / 25%); backdrop-filter: blur(6px); }
 .map-legend span { display: inline-flex; align-items: center; gap: 5px; font-size: .6875rem; font-weight: 650; white-space: nowrap; }
 .map-legend i { height: 9px; width: 9px; border: 2px solid white; border-radius: 999px; }
-.legend-station { background: #d54532; } .legend-platform { background: #0b5278; } .legend-edge { background: #e08a14; } .legend-entrance { background: #20845a; } .legend-equipment { background: #7564a5; }
+.legend-station { background: #d54532; } .legend-platform { background: #0b5278; } .legend-track-coordinate { background: #1873a5; } .legend-platform-start { background: #20a464; } .legend-platform-end { background: #d54532; } .legend-entrance { background: #20845a; } .legend-equipment { background: #7564a5; }
 .legend-source { padding-left: 4px; color: #cbd7dc; }
 .leaflet-control-attribution { font-size: 10px !important; }
 .leaflet-popup-content { color: #18313f; line-height: 1.55; }
