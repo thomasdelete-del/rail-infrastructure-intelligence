@@ -1,7 +1,10 @@
 from datetime import date
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from app.collectors.openstation import OpenStationCollector
+from app.collectors.osm import OpenStreetMapCollector
+from app.collectors.stada import StaDaCollector
+from app.collectors.fasta import FaStaCollector
 from app.database import database_health
 from app.repository import load_infrastructure_inventory, summarize_infrastructure_inventory
 from app.seed.friedberg import FRIEDBERG
@@ -10,7 +13,7 @@ from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SO
 from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBERG_SERVICE_TRACK_CONFLICTS, SOURCE_2026 as SERVICE_TRACK_SOURCE
 from app.services.change_report import build_change_report
 
-app = FastAPI(title="Rail Infrastructure Intelligence", version="1.0.1", description="Source-aware digital infrastructure twin for railway stations.")
+app = FastAPI(title="Rail Infrastructure Intelligence", version="1.1.0", description="Source-aware digital infrastructure twin for railway stations.")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -24,7 +27,7 @@ app.add_middleware(
 )
 
 @app.get("/")
-def root(): return {"service": "rail-infrastructure-intelligence", "version": "1.0.1", "pilot": "Friedberg (Hess)", "docs": "/docs"}
+def root(): return {"service": "rail-infrastructure-intelligence", "version": "1.1.0", "pilot": "Friedberg (Hess)", "docs": "/docs"}
 
 @app.get("/health")
 def health(): return {"status": "ok"}
@@ -63,6 +66,33 @@ def state(at: date = Query(default_factory=date.today)):
 @app.get("/stations/friedberg-hess/change-report/openstation")
 async def openstation_change_report(persist: bool = False):
     return await build_change_report(OpenStationCollector(), FRIEDBERG["name"], persist=persist)
+
+@app.get("/stations/friedberg-hess/change-report/osm")
+async def osm_change_report(persist: bool = False):
+    return await build_change_report(OpenStreetMapCollector(), FRIEDBERG["name"], persist=persist)
+
+async def _configured_report(collector, persist: bool):
+    if not collector.configured:
+        raise HTTPException(status_code=503, detail=f"{collector.name} is not configured")
+    return await build_change_report(collector, FRIEDBERG["name"], persist=persist)
+
+@app.get("/stations/friedberg-hess/change-report/stada")
+async def stada_change_report(persist: bool = False):
+    return await _configured_report(StaDaCollector(), persist)
+
+@app.get("/stations/friedberg-hess/change-report/fasta")
+async def fasta_change_report(persist: bool = False):
+    return await _configured_report(FaStaCollector(), persist)
+
+@app.get("/stations/friedberg-hess/source-status")
+def source_status():
+    stada, fasta = StaDaCollector(), FaStaCollector()
+    return {"station": FRIEDBERG["name"], "sources": [
+        {"key": "db-infrago-openstation-netex", "name": "DB InfraGO OpenStation / NeTEx", "configured": True, "quality_class": "A"},
+        {"key": "openstreetmap", "name": "OpenStreetMap", "configured": True, "quality_class": "D"},
+        {"key": "db-infrago-stada", "name": "DB InfraGO StaDa", "configured": stada.configured, "quality_class": "A"},
+        {"key": "db-infrago-fasta", "name": "DB InfraGO FaSta", "configured": fasta.configured, "quality_class": "A"},
+    ]}
 
 @app.get("/stations/friedberg-hess/infrastructure/openstation")
 def openstation_infrastructure():

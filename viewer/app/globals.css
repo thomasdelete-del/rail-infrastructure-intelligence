@@ -59,8 +59,19 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .evidence-table th, .evidence-table td { border-bottom: 1px solid #dde5e8; padding: 12px 14px; vertical-align: top; }
 .evidence-table tr:last-child td { border-bottom: 0; }
 .source-chip { display: inline-flex; border-radius: 4px; background: #e8f6ef; padding: 3px 7px; color: #176944; font-size: .75rem; font-weight: 700; }
+.source-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.source-row { display: flex; min-height: 78px; align-items: center; gap: 11px; border-right: 1px solid var(--border); padding: 14px 18px; }
+.source-row:last-child { border-right: 0; }
+.source-indicator { height: 11px; width: 11px; flex: none; border-radius: 999px; }
+.source-active { background: #20845a; box-shadow: 0 0 0 4px #e8f6ef; }
+.source-pending { background: #b26a22; box-shadow: 0 0 0 4px #fff1df; }
+.source-state-active, .source-state-pending { border-radius: 999px; padding: 3px 8px; font-size: .75rem; font-weight: 700; white-space: nowrap; }
+.source-state-active { background: #e8f6ef; color: #176944; }
+.source-state-pending { background: #fff1df; color: #87420f; }
 
 @media (max-width: 520px) { .status-ok { max-width: 34px; overflow: hidden; padding: 8px; } }
 @media (max-width: 1023px) { .object-list { max-height: 360px; border-right: 0; border-bottom: 1px solid var(--border); } .detail-panel { padding: 22px 18px; } }
+@media (max-width: 1023px) { .source-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .source-row:nth-child(2) { border-right: 0; } .source-row:nth-child(-n+2) { border-bottom: 1px solid var(--border); } }
+@media (max-width: 560px) { .source-grid { grid-template-columns: 1fr; } .source-row { border-right: 0; border-bottom: 1px solid var(--border); } .source-row:last-child { border-bottom: 0; } }
 @media (max-width: 640px) { .evidence-table thead { display: none; } .evidence-table tr { display: grid; padding: 10px 0; } .evidence-table td { border: 0; padding: 4px 12px; } .evidence-table td:first-child { color: var(--muted-foreground); font-size: .75rem; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

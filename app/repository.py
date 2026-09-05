@@ -44,10 +44,12 @@ def store_observations(items: list[dict[str, Any]]) -> int:
         for item in items:
             source_id = connection.execute(text('''
                 INSERT INTO source (source_key, publisher, url, source_type, quality_class)
-                VALUES (:key, 'DB InfraGO AG', :url, 'primary', :quality)
+                VALUES (:key, :publisher, :url, :source_type, :quality)
                 ON CONFLICT (source_key) DO UPDATE SET source_key = EXCLUDED.source_key
                 RETURNING id
-            '''), {"key": item["source_key"], "url": item.get("source_url"), "quality": item.get("quality_class", "A")}).scalar_one()
+            '''), {"key": item["source_key"], "publisher": item.get("source_publisher", "Unknown"),
+                   "url": item.get("source_url"), "source_type": item.get("source_type", "external"),
+                   "quality": item.get("quality_class", "F")}).scalar_one()
             object_id = connection.execute(text('''
                 INSERT INTO infrastructure_object (object_key, object_type)
                 VALUES (:key, :type)
@@ -63,6 +65,21 @@ def store_observations(items: list[dict[str, Any]]) -> int:
                 "derived": item.get("is_derived", False), "note": item.get("note"),
                 "provenance": json.dumps(item.get("metadata", {})),
             })
+            parent_key = item.get("metadata", {}).get("parent_object_key")
+            if parent_key:
+                parent_id = connection.execute(text(
+                    "SELECT id FROM infrastructure_object WHERE object_key = :key"
+                ), {"key": parent_key}).scalar_one_or_none()
+                if parent_id:
+                    connection.execute(text('''
+                        INSERT INTO object_relation (subject_id, predicate, object_id, source_id)
+                        SELECT :child, 'part_of', :parent, :source
+                        WHERE NOT EXISTS (
+                            SELECT 1 FROM object_relation
+                            WHERE subject_id = :child AND predicate = 'part_of'
+                              AND object_id = :parent AND source_id = :source
+                        )
+                    '''), {"child": object_id, "parent": parent_id, "source": source_id})
     return len(items)
 
 

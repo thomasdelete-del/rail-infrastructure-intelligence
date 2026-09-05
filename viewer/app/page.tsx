@@ -8,6 +8,7 @@ type Evidence = { attribute: string; value: unknown; unit: string | null; source
 type InfraObject = { object_key: string; object_type: string; parent_object_key: string | null; depth: number; observations: Evidence[] };
 type Inventory = { station: string; object_count: number; objects: InfraObject[] };
 type State = { station: string; object_count: number; object_types: Record<string, number>; platform_edges: string[]; equipment_types: Record<string, number>; conflict_count: number; data_gaps: { code: string; source: string }[] };
+type SourceStatus = { key: string; name: string; configured: boolean; quality_class: string };
 
 function currentValue(object: InfraObject, attribute: string) {
   const values = object.observations.filter((item) => item.attribute === attribute);
@@ -16,7 +17,7 @@ function currentValue(object: InfraObject, attribute: string) {
 
 const equipmentLabels: Record<string, string> = { PassengerInformationEquipment: 'Fahrgastinformation', ShelterEquipment: 'Wetterschutz', StaircaseEquipment: 'Treppen', LiftEquipment: 'Aufzüge' };
 const typeLabels: Record<string, string> = { stop_place: 'Bahnhof', platform: 'Bahnsteig', platform_edge: 'Bahnsteigkante', entrance: 'Zugang', equipment: 'Ausstattung' };
-const attributeLabels: Record<string, string> = { name: 'Bezeichnung', equipment_type: 'Ausstattungstyp', quay_type: 'Bahnsteigtyp', public_use: 'Öffentliche Nutzung', gated: 'Zugang', lighting: 'Beleuchtung', mobility_impaired_access: 'Barrierefreiheit', safe_for_guide_dog: 'Für Blindenführhund geeignet', number_of_steps: 'Stufen', fixed: 'Fest installiert', is_external: 'Außenzugang', is_entry: 'Eingang', is_exit: 'Ausgang' };
+const attributeLabels: Record<string, string> = { name: 'Bezeichnung', equipment_type: 'Ausstattungstyp', quay_type: 'Bahnsteigtyp', public_use: 'Öffentliche Nutzung', gated: 'Zugang', lighting: 'Beleuchtung', mobility_impaired_access: 'Barrierefreiheit', safe_for_guide_dog: 'Für Blindenführhund geeignet', number_of_steps: 'Stufen', fixed: 'Fest installiert', is_external: 'Außenzugang', is_entry: 'Eingang', is_exit: 'Ausgang', latitude: 'Breitengrad', longitude: 'Längengrad', operational_state: 'Betriebszustand', wheelchair: 'Rollstuhlgerecht', tactile_paving: 'Taktile Markierung', station_number: 'Stationsnummer', uic_ref: 'OSM-UIC-Referenz' };
 const filters = ['all', 'platform', 'platform_edge', 'entrance', 'equipment'] as const;
 const gapLabels: Record<string, { title: string; text: string }> = {
   station_coordinates_missing: { title: 'Stationskoordinaten fehlen', text: 'OpenStation liefert aktuell keinen Standortpunkt für den Bahnhof.' },
@@ -27,6 +28,7 @@ const gapLabels: Record<string, { title: string; text: string }> = {
 export default function Home() {
   const [state, setState] = useState<State | null>(null);
   const [inventory, setInventory] = useState<Inventory | null>(null);
+  const [sources, setSources] = useState<SourceStatus[]>([]);
   const [error, setError] = useState(false);
   const [updated, setUpdated] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -37,12 +39,14 @@ export default function Home() {
   async function load() {
     setRefreshing(true); setError(false);
     try {
-      const [stateResponse, inventoryResponse] = await Promise.all([
+      const [stateResponse, inventoryResponse, sourceResponse] = await Promise.all([
         fetch(`${API}/stations/friedberg-hess/state/openstation`, { cache: 'no-store' }),
         fetch(`${API}/stations/friedberg-hess/infrastructure/openstation`, { cache: 'no-store' }),
+        fetch(`${API}/stations/friedberg-hess/source-status`, { cache: 'no-store' }),
       ]);
-      if (!stateResponse.ok || !inventoryResponse.ok) throw new Error('API unavailable');
-      setState(await stateResponse.json()); setInventory(await inventoryResponse.json()); setUpdated(new Date());
+      if (!stateResponse.ok || !inventoryResponse.ok || !sourceResponse.ok) throw new Error('API unavailable');
+      const sourceData = await sourceResponse.json();
+      setState(await stateResponse.json()); setInventory(await inventoryResponse.json()); setSources(sourceData.sources); setUpdated(new Date());
     } catch { setError(true); } finally { setRefreshing(false); }
   }
 
@@ -72,9 +76,10 @@ export default function Home() {
       <button onClick={load} disabled={refreshing} className="flex min-h-11 items-center gap-2 rounded-md border border-white/20 px-4 text-sm font-medium hover:bg-white/10 disabled:opacity-60"><RefreshCw size={16} className={refreshing ? 'animate-spin' : ''}/>Aktualisieren</button>
     </div></header>
     <div className="mx-auto max-w-[1440px] px-5 py-7 lg:px-10 lg:py-10">
-      <section className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p className="mb-2 text-sm font-semibold uppercase tracking-[0.16em] text-[#b25b18]">Infrastruktur-Viewer</p><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Friedberg (Hess)</h1><p className="mt-2 text-base text-muted-foreground">Quellenbelegter Ist-Zustand aus DB InfraGO OpenStation / NeTEx</p></div><div className="flex items-center gap-2 text-sm text-muted-foreground"><Database size={16}/>{updated ? `Abgerufen ${updated.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}` : 'Live-Daten werden geladen'}</div></section>
+      <section className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p className="mb-2 text-sm font-semibold uppercase tracking-[0.16em] text-[#b25b18]">Infrastruktur-Viewer</p><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Friedberg (Hess)</h1><p className="mt-2 text-base text-muted-foreground">Quellenbelegter Ist-Zustand aus mehreren unabhängigen Datenquellen</p></div><div className="flex items-center gap-2 text-sm text-muted-foreground"><Database size={16}/>{updated ? `Abgerufen ${updated.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}` : 'Live-Daten werden geladen'}</div></section>
       {error ? <section className="mb-7 rounded-lg border border-red-300 bg-red-50 p-5 text-red-900"><p className="font-semibold">Datenquelle momentan nicht erreichbar</p><p className="mt-1 text-sm">Bitte in einigen Sekunden erneut aktualisieren.</p></section> : null}
       <section className="mb-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Infrastrukturobjekte" value={state?.object_count} accent="navy"/><Metric label="Bahnsteigkanten" value={state?.object_types.platform_edge} accent="orange"/><Metric label="Ausstattung" value={state?.object_types.equipment} accent="steel"/><Metric label="Aktuelle Konflikte" value={state?.conflict_count} accent="green"/></section>
+      <section className="mb-7 rounded-xl border border-border bg-card shadow-sm"><div className="flex flex-col justify-between gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-center sm:px-6"><div><h2 className="text-lg font-bold">Datenquellen</h2><p className="mt-1 text-sm text-muted-foreground">Aktive Verbindungen und Qualitätsklasse</p></div><span className="text-sm font-semibold text-[#176944]">{sources.filter((source) => source.configured).length} von {sources.length || 4} verbunden</span></div><div className="source-grid">{sources.map((source) => <div className="source-row" key={source.key}><span className={`source-indicator ${source.configured ? 'source-active' : 'source-pending'}`}/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{source.name}</p><p className="mt-1 text-xs text-muted-foreground">Qualitätsklasse {source.quality_class}</p></div><span className={source.configured ? 'source-state-active' : 'source-state-pending'}>{source.configured ? 'Aktiv' : 'Zugang fehlt'}</span></div>)}</div></section>
       <div className="grid gap-7 xl:grid-cols-[minmax(0,1.55fr)_minmax(320px,.75fr)]">
         <section className="rounded-xl border border-border bg-card shadow-sm"><div className="flex items-center justify-between border-b border-border px-5 py-4 sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigübersicht</h2><p className="mt-1 text-sm text-muted-foreground">Bahnsteige und zugeordnete Gleise aus NeTEx</p></div><span className="status-ok"><ShieldCheck size={15}/>Identität geprüft</span></div><div className="space-y-3 p-4 sm:p-6">{platforms.length ? platforms.map((platform, index) => <PlatformRow key={platform.object_key} name={platform.name} edges={platform.edges} index={index + 1}/>) : [1,2,3,4,5].map((n) => <div key={n} className="h-[72px] animate-pulse rounded-lg bg-muted"/>)}</div></section>
         <div className="space-y-7"><section className="rounded-xl border border-border bg-card shadow-sm"><div className="border-b border-border px-5 py-4"><h2 className="text-lg font-bold">Ausstattung</h2><p className="mt-1 text-sm text-muted-foreground">Tatsächlich in NeTEx vorhandene Elemente</p></div><div className="divide-y divide-border px-5">{state ? Object.entries(state.equipment_types).map(([type, count]) => <div key={type} className="flex items-center justify-between py-4"><span className="text-sm font-medium">{equipmentLabels[type] ?? type}</span><strong className="tabular-nums">{count}</strong></div>) : [1,2,3].map((n) => <div key={n} className="my-3 h-8 animate-pulse rounded bg-muted"/>)}</div></section>
@@ -110,7 +115,7 @@ function ObjectDetail({ object }: { object: InfraObject | null }) {
   const title = currentValue(object, 'name') ?? equipmentLabels[currentValue(object, 'equipment_type') ?? ''] ?? typeLabels[object.object_type] ?? object.object_type;
   const netexId = evidence.find((entry) => entry.provenance?.netex_id)?.provenance?.netex_id;
   return <article className="detail-panel"><div className="border-b border-border pb-5"><span className="detail-type">{typeLabels[object.object_type] ?? object.object_type}</span><h3 className="mt-3 text-2xl font-bold tracking-tight">{title}</h3>{netexId ? <p className="mt-2 break-all font-mono text-xs text-muted-foreground">{String(netexId)}</p> : null}</div>
-    <div className="mt-5 overflow-hidden rounded-lg border border-border"><table className="evidence-table"><thead><tr><th>Attribut</th><th>Wert</th><th>Quelle</th></tr></thead><tbody>{evidence.map((entry) => <tr key={`${entry.attribute}:${entry.source_key}`}><td>{attributeLabels[entry.attribute] ?? entry.attribute.replaceAll('_', ' ')}</td><td className="font-medium">{typeof entry.value === 'boolean' ? (entry.value ? 'Ja' : 'Nein') : String(entry.value)}{entry.unit ? ` ${entry.unit}` : ''}</td><td><span className="source-chip">{entry.source_key === 'db-infrago-openstation-netex' ? 'DB InfraGO' : entry.source_key}</span></td></tr>)}</tbody></table></div>
+    <div className="mt-5 overflow-hidden rounded-lg border border-border"><table className="evidence-table"><thead><tr><th>Attribut</th><th>Wert</th><th>Quelle</th></tr></thead><tbody>{evidence.map((entry) => <tr key={`${entry.attribute}:${entry.source_key}`}><td>{attributeLabels[entry.attribute] ?? entry.attribute.replaceAll('_', ' ')}</td><td className="font-medium">{typeof entry.value === 'boolean' ? (entry.value ? 'Ja' : 'Nein') : String(entry.value)}{entry.unit ? ` ${entry.unit}` : ''}</td><td><span className="source-chip">{{'db-infrago-openstation-netex': 'DB OpenStation', 'db-infrago-stada': 'DB StaDa', 'db-infrago-fasta': 'DB FaSta', openstreetmap: 'OpenStreetMap'}[entry.source_key] ?? entry.source_key}</span></td></tr>)}</tbody></table></div>
     <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><Database size={15}/>Quellenwerte werden nicht überschrieben.</p>
   </article>;
 }

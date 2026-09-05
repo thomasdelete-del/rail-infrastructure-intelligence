@@ -234,7 +234,8 @@ class OpenStationCollector(Collector):
                     if re.fullmatch(r"\d+[a-zA-Z]?", track):
                         object_key = f"FRI-PE-{track.upper()}"
                 common = dict(object_key=object_key, object_type=entity["object_type"],
-                              source_key=self.source_key, source_url=self.netex_url, quality_class="A",
+                              source_key=self.source_key, source_url=self.netex_url,
+                              source_publisher="DB InfraGO AG", source_type="primary_api", quality_class="A",
                               metadata={"netex_id": entity["netex_id"], "netex_type": entity["netex_type"],
                                         "parent_netex_id": entity["parent_netex_id"], "station_netex_id": record["netex_id"]})
                 for attribute, value in entity["attributes"].items():

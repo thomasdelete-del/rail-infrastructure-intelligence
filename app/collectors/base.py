@@ -12,6 +12,8 @@ class CollectedObservation:
     unit: str | None
     source_key: str
     source_url: str
+    source_publisher: str = "Unknown"
+    source_type: str = "external"
     source_date: str | None = None
     quality_class: str = "F"
     is_derived: bool = False
