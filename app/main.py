@@ -14,8 +14,9 @@ from app.seed.friedberg_geometry import FRIEDBERG_GEOMETRY
 from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SOURCES
 from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBERG_SERVICE_TRACK_CONFLICTS, SOURCE_2026 as SERVICE_TRACK_SOURCE
 from app.services.change_report import build_change_report
+from app.services.aerial_analysis import analyse_osm_platform
 
-app = FastAPI(title="Rail Infrastructure Intelligence", version="1.1.1", description="Source-aware digital infrastructure twin for railway stations.")
+app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -29,7 +30,7 @@ app.add_middleware(
 )
 
 @app.get("/")
-def root(): return {"service": "rail-infrastructure-intelligence", "version": "1.1.1", "pilot": "Friedberg (Hess)", "docs": "/docs"}
+def root(): return {"service": "rail-infrastructure-intelligence", "version": "1.2.0", "pilot": "Friedberg (Hess)", "docs": "/docs"}
 
 @app.get("/health")
 def health(): return {"status": "ok"}
@@ -72,6 +73,17 @@ async def openstation_change_report(persist: bool = False):
 @app.get("/stations/friedberg-hess/change-report/osm")
 async def osm_change_report(persist: bool = False):
     return await build_change_report(OpenStreetMapCollector(), FRIEDBERG["name"], persist=persist)
+
+@app.get("/stations/friedberg-hess/aerial-analysis/osm")
+async def osm_aerial_analysis(track: str = Query(min_length=1, max_length=4, pattern=r"^\d+[a-zA-Z]?$")):
+    try:
+        return await analyse_osm_platform(track)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="Luftbild- oder OSM-Quelle ist vorübergehend nicht erreichbar") from error
 
 @app.get("/stations/friedberg-hess/change-report/rinf")
 async def rinf_change_report(persist: bool = False):

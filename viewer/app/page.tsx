@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ChevronRight, Crosshair, Database, ExternalLink, Filter, MapPinOff, RefreshCw, Satellite, Search, ShieldCheck, TrainFront, X } from 'lucide-react';
 import { StationMap, type CoordinateEdit, type StationMapPoint } from './station-map';
 
@@ -15,6 +15,7 @@ type ReferenceEdge = { object_id: string; track: string; observations: Reference
 type ReferenceStation = { platform_edges: ReferenceEdge[]; sources: { id: string; publisher: string; source_date: string; url: string }[] };
 type Coordinate = { latitude: number; longitude: number };
 type CoordinateDrafts = Record<string, Coordinate>;
+type AerialAnalysis = { status: 'plausible' | 'check' | 'high' | 'insufficient_evidence'; confidence: number; reason?: string; candidate_start?: Coordinate; candidate_end?: Coordinate; candidate_length_m?: number; length_delta_m?: number; maximum_endpoint_shift_m?: number; detected_segments?: number; provenance?: { source?: string; layer?: string }; advisory_only: boolean };
 
 function currentValue(object: InfraObject, attribute: string) {
   const values = object.observations.filter((item) => item.attribute === attribute);
@@ -121,6 +122,13 @@ export default function Home() {
     });
     setCoordinateEdit(null);
   }, []);
+  const applyCoordinateSuggestion = useCallback((objectKey: string, start: Coordinate, end: Coordinate) => {
+    setCoordinateDrafts((current) => {
+      const next = { ...current, [`${objectKey}:start`]: start, [`${objectKey}:end`]: end };
+      localStorage.setItem('friedberg-coordinate-drafts', JSON.stringify(next));
+      return next;
+    });
+  }, []);
   const focusPlatform = useCallback((objectKey: string) => {
     setSelectedKey(objectKey);
     setFocusObjectKey(objectKey);
@@ -144,7 +152,7 @@ export default function Home() {
           <section className="rounded-xl border border-[#e9c9ad] bg-[#fff9f3] shadow-sm"><div className="flex items-center gap-2 border-b border-[#efd8c5] px-5 py-4 text-[#87420f]"><AlertTriangle size={18}/><h2 className="text-lg font-bold">Datenlücken</h2></div><div className="space-y-4 p-5">{state?.data_gaps.map((gap) => { const copy = gapLabels[gap.code] ?? { title: gap.code, text: gap.source }; return <div key={gap.code} className="flex gap-3"><MapPinOff size={17} className="mt-0.5 shrink-0 text-[#b25b18]"/><div><p className="text-sm font-semibold">{copy.title}</p><p className="mt-0.5 text-sm leading-5 text-[#73543d]">{copy.text}</p></div></div>; })}</div></section>
         </div>
       </div>
-      <PlatformDataTable reference={reference} inventory={inventory} coordinateDrafts={coordinateDrafts} onFocus={focusPlatform} onAerialReview={(objectKey) => { focusPlatform(objectKey); setAerialReviewRequest({ objectKey, nonce: Date.now() }); }} onEdit={(edit) => { setCoordinateEdit(edit); focusPlatform(edit.objectKey); }}/>
+      <PlatformDataTable reference={reference} inventory={inventory} coordinateDrafts={coordinateDrafts} onFocus={focusPlatform} onAerialReview={(objectKey) => { focusPlatform(objectKey); setAerialReviewRequest({ objectKey, nonce: Date.now() }); }} onApplySuggestion={applyCoordinateSuggestion} onEdit={(edit) => { setCoordinateEdit(edit); focusPlatform(edit.objectKey); }}/>
       <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="border-b border-border px-5 py-5 sm:px-6"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h2 className="text-lg font-bold">Objektkatalog</h2><p className="mt-1 text-sm text-muted-foreground">Infrastruktur durchsuchen und Evidenz im Detail prüfen</p></div><label className="search-box"><Search size={17}/><span className="sr-only">Objekte durchsuchen</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, Gleis oder NeTEx-ID"/>{query ? <button aria-label="Suche löschen" onClick={() => setQuery('')}><X size={16}/></button> : null}</label></div>
           <div className="mt-4 flex flex-wrap gap-2" aria-label="Objekttyp filtern"><Filter size={16} className="mt-2 text-muted-foreground"/>{filters.map((filter) => <button key={filter} aria-pressed={typeFilter === filter} onClick={() => setTypeFilter(filter)} className="filter-button">{filter === 'all' ? 'Alle' : typeLabels[filter]}{filter !== 'all' && state ? <span>{state.object_types[filter] ?? 0}</span> : null}</button>)}</div>
@@ -166,8 +174,11 @@ export default function Home() {
 function Metric({ label, value, accent }: { label: string; value?: number; accent: string }) { return <div className={`metric metric-${accent}`}><p>{label}</p><strong>{value ?? '–'}</strong></div>; }
 function PlatformRow({ name, edges, index }: { name: string; edges: string[]; index: number }) { return <div className="platform-row"><div className="platform-index">B{index}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-muted-foreground">{name}</p><div className="mt-2 flex flex-wrap gap-2">{edges.map((edge) => <span key={edge} className="track-pill">Gleis {edge}</span>)}</div></div><div className="hidden h-1 w-20 rounded-full bg-[#f5a623] sm:block"/></div>; }
 
-function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, onAerialReview, onEdit }: { reference: ReferenceStation | null; inventory: Inventory | null; coordinateDrafts: CoordinateDrafts; onFocus: (objectKey: string) => void; onAerialReview: (objectKey: string) => void; onEdit: (edit: CoordinateEdit) => void }) {
+function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, onAerialReview, onApplySuggestion, onEdit }: { reference: ReferenceStation | null; inventory: Inventory | null; coordinateDrafts: CoordinateDrafts; onFocus: (objectKey: string) => void; onAerialReview: (objectKey: string) => void; onApplySuggestion: (objectKey: string, start: Coordinate, end: Coordinate) => void; onEdit: (edit: CoordinateEdit) => void }) {
   const [osmConfirmed, setOsmConfirmed] = useState<Record<string, boolean>>({});
+  const [aerialResults, setAerialResults] = useState<Record<string, AerialAnalysis>>({});
+  const [aerialLoading, setAerialLoading] = useState<Record<string, boolean>>({});
+  const requestedAerialTracks = useRef(new Set<string>());
   useEffect(() => {
     try { setOsmConfirmed(JSON.parse(localStorage.getItem('friedberg-osm-confirmations') ?? '{}') as Record<string, boolean>); } catch { setOsmConfirmed({}); }
   }, []);
@@ -239,6 +250,22 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
     }
     return { level, reasons: reasons.length ? reasons : ['OSM-Geometrie intern plausibel'] };
   };
+  useEffect(() => {
+    if (!reference || !inventory) return;
+    reference.platform_edges.forEach((edge) => {
+      if (osmPlausibility(edge).level === 'ok' || requestedAerialTracks.current.has(edge.track)) return;
+      requestedAerialTracks.current.add(edge.track);
+      setAerialLoading((current) => ({ ...current, [edge.track]: true }));
+      void fetch(`${API}/stations/friedberg-hess/aerial-analysis/osm?track=${encodeURIComponent(edge.track)}`, { cache: 'no-store' })
+        .then(async (response) => {
+          if (!response.ok) throw new Error('Luftbildanalyse nicht erreichbar');
+          const result = await response.json() as AerialAnalysis;
+          setAerialResults((current) => ({ ...current, [edge.track]: result }));
+        })
+        .catch(() => setAerialResults((current) => ({ ...current, [edge.track]: { status: 'insufficient_evidence', confidence: 0, reason: 'Automatische Luftbildprüfung momentan nicht verfügbar', advisory_only: true } })))
+        .finally(() => setAerialLoading((current) => ({ ...current, [edge.track]: false })));
+    });
+  }, [reference, inventory, coordinateDrafts]);
   const comparison = (edge: ReferenceEdge) => {
     const osm = proposedLength(edge) ?? Number(osmValue(edge, 'construction_length')?.value);
     const db = Number(value(edge, 'net_construction_length')?.value);
@@ -254,7 +281,8 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
     const osmId = observation?.provenance?.osm_id;
     const updatedLength = proposedLength(edge);
     const plausibility = osmPlausibility(edge);
-    return <div className="data-value">{updatedLength !== null ? <div className="updated-length"><span className="updated-badge">Aktualisiert</span><strong>{updatedLength.toFixed(1)} m</strong><span>Neue OSM-Länge · Grundlage der Abweichung</span></div> : null}<strong>{format(observation) ?? 'Nicht geliefert'}</strong><span>OSM · bisherige Ist-Geometrie</span>{plausibility.level !== 'ok' ? <div className={`osm-plausibility osm-plausibility-${plausibility.level}`}><strong>{plausibility.level === 'check' ? 'OSM prüfen' : 'OSM auffällig'}</strong>{plausibility.reasons.map((reason) => <span key={reason}>{reason}</span>)}<button type="button" onClick={() => onAerialReview(edge.object_id)}><Satellite size={13}/>Im Luftbild prüfen</button></div> : null}{osmId ? <a className="source-data-link" href={`https://www.openstreetmap.org/${osmType}/${String(osmId)}`} target="_blank" rel="noreferrer">Original OSM {osmType} {String(osmId)} <ExternalLink size={11}/></a> : null}</div>;
+    const aerial = aerialResults[edge.track];
+    return <div className="data-value">{updatedLength !== null ? <div className="updated-length"><span className="updated-badge">Aktualisiert</span><strong>{updatedLength.toFixed(1)} m</strong><span>Neue OSM-Länge · Grundlage der Abweichung</span></div> : null}<strong>{format(observation) ?? 'Nicht geliefert'}</strong><span>OSM · bisherige Ist-Geometrie</span>{plausibility.level !== 'ok' ? <div className={`osm-plausibility osm-plausibility-${plausibility.level}`}><strong>{plausibility.level === 'check' ? 'OSM prüfen' : 'OSM auffällig'}</strong>{plausibility.reasons.map((reason) => <span key={reason}>{reason}</span>)}{aerialLoading[edge.track] ? <span className="aerial-loading">Amtliches Luftbild wird automatisch ausgewertet …</span> : null}{aerial ? <div className={`aerial-result aerial-result-${aerial.status}`}><strong>Amtliche Luftbildprüfung: {aerial.status === 'plausible' ? 'plausibel' : aerial.status === 'check' ? 'prüfen' : aerial.status === 'high' ? 'auffällig' : 'keine belastbare Aussage'}</strong>{aerial.candidate_length_m !== undefined ? <span>Erkannter Vorschlag: {aerial.candidate_length_m.toFixed(1)} m · Konfidenz {Math.round(aerial.confidence * 100)}%</span> : <span>{aerial.reason}</span>}{aerial.maximum_endpoint_shift_m !== undefined ? <span>Größte Endpunktverschiebung: {aerial.maximum_endpoint_shift_m.toFixed(1)} m</span> : null}{aerial.candidate_start && aerial.candidate_end && aerial.status !== 'plausible' ? <button type="button" onClick={() => onApplySuggestion(edge.object_id, aerial.candidate_start!, aerial.candidate_end!)}>Vorschlag als Prüfpunkte übernehmen</button> : null}</div> : null}<button type="button" onClick={() => onAerialReview(edge.object_id)}><Satellite size={13}/>Im amtlichen Luftbild ansehen</button></div> : null}{osmId ? <a className="source-data-link" href={`https://www.openstreetmap.org/${osmType}/${String(osmId)}`} target="_blank" rel="noreferrer">Original OSM {osmType} {String(osmId)} <ExternalLink size={11}/></a> : null}</div>;
   };
   const usableLengthCell = (edge: ReferenceEdge) => {
     const rinf = rinfValue(edge);

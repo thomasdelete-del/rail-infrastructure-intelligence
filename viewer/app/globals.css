@@ -161,6 +161,11 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .osm-plausibility-high { border-color: #c23b30; background: #fff0ee; }
 .osm-plausibility-high strong { color: #9b2c23; }
 .osm-plausibility button { display: inline-flex; width: fit-content; align-items: center; gap: 5px; margin-top: 4px; border: 1px solid currentColor; border-radius: 4px; background: #fff; padding: 4px 7px; color: inherit; font-size: .7rem; font-weight: 750; cursor: pointer; }
+.aerial-loading { margin-top: 5px; font-style: italic; }
+.aerial-result { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; border-top: 1px solid #d7e0e4; padding-top: 5px; }
+.aerial-result-plausible strong { color: #176944; }
+.aerial-result-check strong { color: #874f0b; }
+.aerial-result-high strong { color: #9b2c23; }
 
 @media (max-width: 520px) { .status-ok { max-width: 34px; overflow: hidden; padding: 8px; } }
 @media (max-width: 700px) { .station-map-heading { align-items: flex-start; padding: 17px 18px; } .map-heading-actions { align-self: flex-start; } .map-summary { display: none; } .station-map-wrap, .station-map { height: 430px; min-height: 430px; } .map-controls { left: 12px; right: 12px; justify-content: space-between; } .map-toggle span { display: none; } .opacity-control { grid-template-columns: auto 64px 32px; } .map-legend { bottom: 26px; left: 12px; } }

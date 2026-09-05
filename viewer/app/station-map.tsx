@@ -188,7 +188,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
 
   return <section id="station-map" className="station-map-card">
     <div className="station-map-heading">
-      <div><p className="map-kicker"><LocateFixed size={15}/>Karteneinstieg</p><h2>Bahnhof Friedberg im Lageplan</h2><p>OSM-Koordinaten auf Satellitenbild prüfen; das amtliche Hessen-DOP ist als zusätzliche Ebene verfügbar.</p></div>
+      <div><p className="map-kicker"><LocateFixed size={15}/>Karteneinstieg</p><h2>Bahnhof Friedberg im Lageplan</h2><p>OSM-Koordinaten werden zuerst mit dem amtlichen Hessen-DOP geprüft; das allgemeine Satellitenbild bleibt als zweite Ansicht verfügbar.</p></div>
       <div className="map-heading-actions"><a className="geodata-link" href={HESSEN_GEODATENVIEWER} target="_blank" rel="noreferrer">Geodatenviewer Hessen <ExternalLink size={14}/></a><div className="map-summary"><strong>{points.length || '–'}</strong><span>verortete Messpunkte</span></div></div>
     </div>
     <div className="station-map-wrap">
