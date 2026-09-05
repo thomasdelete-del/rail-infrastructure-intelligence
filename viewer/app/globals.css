@@ -176,7 +176,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .platform-check-switch-on > span { background: #20845a; }
 .platform-check-switch-on > span::after { transform: translateX(13px); }
 .platform-check-results { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; border-bottom: 1px solid var(--border); background: var(--border); }
-.platform-check-result { display: flex; min-height: 132px; flex-direction: column; gap: 4px; background: #fff; padding: 14px; }
+.platform-check-result { display: flex; min-height: 132px; flex-direction: column; gap: 4px; background: #fff; padding: 14px; cursor: pointer; }
+.platform-check-result:hover, .platform-check-result:focus-visible { position: relative; z-index: 1; background: #f7fbfd; outline: 2px solid #0b5278; outline-offset: -2px; }
 .platform-check-result > strong { font-size: .8rem; }
 .platform-check-result > span { color: #60727c; font-size: .73rem; }
 .platform-check-result-plausible { box-shadow: inset 0 3px #20845a; }
@@ -185,6 +186,10 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .platform-result-track { width: fit-content; border: 0; background: transparent; padding: 0; color: #0b5278; font-size: .92rem; font-weight: 800; cursor: pointer; }
 .platform-result-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: auto; padding-top: 6px; }
 .platform-result-actions button { border: 1px solid #b7c5cb; border-radius: 4px; background: #fff; padding: 4px 6px; color: #274653; font-size: .68rem; font-weight: 700; cursor: pointer; }
+.map-review-label { border: 0; border-radius: 4px; box-shadow: 0 1px 4px rgb(7 27 43 / .3); padding: 4px 7px; font-size: .72rem; font-weight: 800; }
+.map-review-osm { background: #fff4dc; color: #7d4a00; }
+.map-review-proposal { background: #dcf8ff; color: #00677c; }
+.map-review-deviation { background: #ffe9e7; color: #9b2c23; }
 @media (max-width: 640px) { .platform-check-panel { align-items: stretch; flex-direction: column; padding: 14px 18px; } .platform-check-switch { width: 100%; } }
 
 @media (max-width: 520px) { .status-ok { max-width: 34px; overflow: hidden; padding: 8px; } }

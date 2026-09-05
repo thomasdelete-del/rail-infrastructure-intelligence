@@ -40,12 +40,13 @@ function escapeHtml(value: string) {
 }
 
 export type CoordinateEdit = { objectKey: string; coordinateType: 'start' | 'end'; title: string };
+type AerialReviewAnalysis = { candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; maximum_endpoint_shift_m?: number; confidence?: number };
 
 export function StationMap({ points, focusObjectKey, coordinateEdit, aerialReviewRequest, onSelect, onBeginCoordinateEdit, onCoordinateChange, onCancelEdit }: {
   points: StationMapPoint[];
   focusObjectKey: string | null;
   coordinateEdit: CoordinateEdit | null;
-  aerialReviewRequest: { objectKey: string; nonce: number } | null;
+  aerialReviewRequest: { objectKey: string; nonce: number; analysis?: AerialReviewAnalysis } | null;
   onSelect: (objectKey: string) => void;
   onBeginCoordinateEdit: (edit: CoordinateEdit) => void;
   onCoordinateChange: (edit: CoordinateEdit, latitude: number, longitude: number) => void;
@@ -54,6 +55,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const markerLayerRef = useRef<LayerGroup | null>(null);
+  const reviewLayerRef = useRef<LayerGroup | null>(null);
   const satelliteLayerRef = useRef<TileLayer | null>(null);
   const aerialLayerRef = useRef<TileLayer | null>(null);
   const lastFocusedObjectRef = useRef<string | null>(null);
@@ -89,8 +91,10 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
         attribution: 'Luftbild: &copy; Hessische Verwaltung f&uuml;r Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
       }).addTo(map);
       const markerLayer = L.layerGroup().addTo(map);
+      const reviewLayer = L.layerGroup().addTo(map);
       mapRef.current = map;
       markerLayerRef.current = markerLayer;
+      reviewLayerRef.current = reviewLayer;
       satelliteLayerRef.current = satellite;
       aerialLayerRef.current = aerial;
       setMapReady(true);
@@ -100,6 +104,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
       mapRef.current?.remove();
       mapRef.current = null;
       markerLayerRef.current = null;
+      reviewLayerRef.current = null;
       satelliteLayerRef.current = null;
       aerialLayerRef.current = null;
     };
@@ -169,6 +174,36 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
       mapRef.current.fitBounds(bounds.pad(0.45), { maxZoom: 24, animate: true });
     });
   }, [focusObjectKey, mapReady, points]);
+
+  useEffect(() => {
+    if (!mapReady || !mapRef.current || !reviewLayerRef.current) return;
+    const layer = reviewLayerRef.current;
+    layer.clearLayers();
+    if (!aerialReviewRequest) return;
+    const original = points.filter((point) => point.objectKey === aerialReviewRequest.objectKey && (point.coordinateType === 'start' || point.coordinateType === 'end'));
+    const analysis = aerialReviewRequest.analysis;
+    if (original.length < 2) return;
+    void import('leaflet').then((L) => {
+      if (!mapRef.current || !reviewLayerRef.current) return;
+      const osmCoordinates = original.map((point) => [point.latitude, point.longitude] as [number, number]);
+      L.polyline(osmCoordinates, { color: '#f59e0b', weight: 5, opacity: .95, dashArray: '10 7' }).bindTooltip('OSM-Bahnsteigkante', { permanent: true, direction: 'center', className: 'map-review-label map-review-osm' }).addTo(reviewLayerRef.current);
+      const allCoordinates = [...osmCoordinates];
+      if (analysis?.candidate_start && analysis.candidate_end) {
+        const proposed: [number, number][] = [[analysis.candidate_start.latitude, analysis.candidate_start.longitude], [analysis.candidate_end.latitude, analysis.candidate_end.longitude]];
+        const direct = mapRef.current.distance(osmCoordinates[0], proposed[0]) + mapRef.current.distance(osmCoordinates[1], proposed[1]);
+        const reversed = mapRef.current.distance(osmCoordinates[0], proposed[1]) + mapRef.current.distance(osmCoordinates[1], proposed[0]);
+        if (reversed < direct) proposed.reverse();
+        L.polyline(proposed, { color: '#00a6c7', weight: 6, opacity: .95 }).bindTooltip(`Luftbild-Vorschlag${analysis.candidate_length_m ? ` · ${analysis.candidate_length_m.toFixed(1)} m` : ''}`, { permanent: true, direction: 'center', className: 'map-review-label map-review-proposal' }).addTo(reviewLayerRef.current);
+        proposed.forEach((coordinate, index) => {
+          const shift = mapRef.current!.distance(osmCoordinates[index], coordinate);
+          L.polyline([osmCoordinates[index], coordinate], { color: '#d32f2f', weight: 3, opacity: .95, dashArray: '4 5' }).bindTooltip(`Abweichung ${shift.toFixed(1)} m`, { permanent: true, direction: 'center', className: 'map-review-label map-review-deviation' }).addTo(reviewLayerRef.current!);
+          L.circleMarker(coordinate, { radius: 7, color: '#fff', weight: 2, fillColor: '#00a6c7', fillOpacity: 1 }).addTo(reviewLayerRef.current!);
+        });
+        allCoordinates.push(...proposed);
+      }
+      mapRef.current.fitBounds(L.latLngBounds(allCoordinates).pad(.35), { maxZoom: 23, animate: true });
+    });
+  }, [aerialReviewRequest, mapReady, points]);
 
   useEffect(() => {
     const map = mapRef.current;
