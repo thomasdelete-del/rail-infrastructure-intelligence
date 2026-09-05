@@ -60,6 +60,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .legend-station { background: #d54532; } .legend-platform { background: #0b5278; } .legend-track-coordinate { background: #1873a5; } .legend-platform-start { background: #20a464; } .legend-platform-end { background: #d54532; } .legend-coordinate-draft { background: repeating-linear-gradient(135deg, #20a464 0 3px, #fff 3px 4px, #20a464 4px 7px); } .legend-entrance { background: #20845a; } .legend-equipment { background: #7564a5; }
 .coordinate-draft-marker { border: 0; background: transparent; }
 .coordinate-draft-marker span { display: block; box-sizing: border-box; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; background: repeating-linear-gradient(135deg, var(--coordinate-color) 0 3px, #fff 3px 4px, var(--coordinate-color) 4px 7px); box-shadow: 0 1px 4px rgb(7 27 43 / 45%); }
+.coordinate-draft-focused span { width: 24px; height: 24px; border: 4px solid #f5a623; }
 .coordinate-draft-start { --coordinate-color: #20a464; }
 .coordinate-draft-end { --coordinate-color: #d54532; }
 .legend-source { padding-left: 4px; color: #cbd7dc; }
