@@ -10,6 +10,7 @@ import httpx
 import numpy as np
 
 from app.collectors.osm import OpenStreetMapCollector, parse_osm_friedberg
+from app.seed.friedberg import FRIEDBERG
 
 
 WMS_URL = "https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows"
@@ -42,6 +43,7 @@ def analyse_platform_crop(
     image_bytes: bytes,
     bbox: tuple[float, float, float, float],
     geometry: list[dict[str, float]],
+    expected_length_m: float | None = None,
 ) -> dict[str, Any]:
     """Detect long image edges parallel to the OSM platform axis.
 
@@ -96,6 +98,23 @@ def analyse_platform_crop(
     if candidate_length < 20:
         return {"status": "insufficient_evidence", "confidence": 0.0,
                 "reason": "Erkannte Kanten decken den Bahnsteig nicht ausreichend ab", "detected_segments": len(accepted)}
+    if expected_length_m and candidate_length > max(expected_length_m + 100, expected_length_m * 1.5):
+        return {
+            "status": "insufficient_evidence",
+            "confidence": 0.0,
+            "reason": "Erkannte Linien sind im Verhältnis zur DB-Nettobaulänge unplausibel; vermutlich wurden Gleise oder Fahrleitungen erkannt",
+            "rejected_candidate_length_m": round(candidate_length, 1),
+            "reference_net_construction_length_m": expected_length_m,
+            "detected_segments": len(accepted),
+        }
+    if len(accepted) > 120:
+        return {
+            "status": "insufficient_evidence",
+            "confidence": 0.0,
+            "reason": "Zu viele parallele Linien im Bild; Bahnsteigkante kann nicht eindeutig von Gleisen und Fahrleitungen getrennt werden",
+            "rejected_candidate_length_m": round(candidate_length, 1),
+            "detected_segments": len(accepted),
+        }
 
     candidate_start_xy = midpoint + axis * lower
     candidate_end_xy = midpoint + axis * upper
@@ -152,7 +171,10 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=45, follow_redirects=True) as client:
         response = await client.get(WMS_URL, params=params, headers={"User-Agent": "rail-infrastructure-intelligence/1.2"})
         response.raise_for_status()
-    result = analyse_platform_crop(response.content, bbox, geometry)
+    reference_edge = next((edge for edge in FRIEDBERG["platform_edges"] if edge["track"].casefold() == track.casefold()), None)
+    expected_length = next((float(item["value"]) for item in reference_edge["observations"]
+                            if item["attribute"] == "net_construction_length"), None) if reference_edge else None
+    result = analyse_platform_crop(response.content, bbox, geometry, expected_length)
     result.update({
         "station": "Friedberg (Hess)", "track": track,
         "osm": {"type": element["type"], "id": element["id"], "url": f"https://www.openstreetmap.org/{element['type']}/{element['id']}"},

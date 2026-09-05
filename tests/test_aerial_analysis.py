@@ -41,3 +41,23 @@ def test_returns_insufficient_evidence_for_blank_crop():
 
     assert result["status"] == "insufficient_evidence"
     assert result["confidence"] == 0
+
+
+def test_rejects_image_lines_that_are_far_longer_than_db_reference():
+    bbox = (0.0, 0.0, 600.0, 100.0)
+    image = np.full((400, 1200, 3), 110, dtype=np.uint8)
+    cv2.line(image, (20, 180), (1180, 180), (245, 245, 245), 4)
+    cv2.line(image, (20, 220), (1180, 220), (235, 235, 235), 4)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    result = analyse_platform_crop(
+        encoded.tobytes(), bbox,
+        [_geometry_point(100, 50), _geometry_point(500, 50)],
+        expected_length_m=250,
+    )
+
+    assert result["status"] == "insufficient_evidence"
+    assert result["confidence"] == 0
+    assert result["rejected_candidate_length_m"] > 500
+    assert "unplausibel" in result["reason"]
