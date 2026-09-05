@@ -16,7 +16,12 @@ def _coordinates(element: dict[str, Any]) -> tuple[float | None, float | None]:
 
 
 def _value(value: Any) -> Any:
-    return {"yes": True, "true": True, "no": False, "false": False}.get(str(value).casefold(), value)
+    normalized = str(value).casefold()
+    if normalized in {"yes", "true", "no", "false"}:
+        return normalized in {"yes", "true"}
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return value
 
 
 def parse_osm_friedberg(payload: dict[str, Any]) -> list[CollectedObservation]:

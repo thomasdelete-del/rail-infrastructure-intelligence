@@ -26,6 +26,8 @@ def test_osm_maps_station_and_nearby_infrastructure_with_provenance():
     assert lift.value == "LiftEquipment"
     assert lift.metadata["parent_object_key"] == ROOT_OBJECT_KEY
     assert lift.source_publisher == "OpenStreetMap contributors"
+    station_number = next(item for item in observations if item.attribute == "station_number")
+    assert station_number.value == 1930
 
 
 def test_stada_maps_master_data_and_rejects_bavaria():
