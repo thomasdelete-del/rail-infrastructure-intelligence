@@ -21,7 +21,7 @@ FRIEDBERG_HESS = StationIdentity(
 
 def is_friedberg_hess(name: str, station_number: int | None = None) -> bool:
     normalized = " ".join(name.casefold().split())
-    valid_names = {"friedberg (hess)", "friedberg hess"}
+    valid_names = {"friedberg (hess)", "friedberg hess", "friedberg (hessen)", "friedberg hessen"}
     if normalized not in valid_names:
         return False
     return station_number in (None, FRIEDBERG_HESS.station_number)

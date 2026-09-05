@@ -15,7 +15,13 @@ def _snake(value: str) -> str:
 
 
 def parse_stada_station(data: dict[str, Any]) -> list[CollectedObservation]:
+    if "result" in data and isinstance(data["result"], list):
+        data = next((item for item in data["result"] if str(item.get("number")) == str(FRIEDBERG_HESS.station_number)), {})
     number, name = data.get("number"), data.get("name", "")
+    try:
+        number = int(number)
+    except (TypeError, ValueError):
+        return []
     if number != FRIEDBERG_HESS.station_number or not is_friedberg_hess(name, number):
         return []
     evas, rils = data.get("evaNumbers", []), data.get("ril100Identifiers", [])

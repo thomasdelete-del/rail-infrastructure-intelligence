@@ -1,4 +1,5 @@
 from datetime import date
+import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from app.collectors.openstation import OpenStationCollector
@@ -74,7 +75,14 @@ async def osm_change_report(persist: bool = False):
 async def _configured_report(collector, persist: bool):
     if not collector.configured:
         raise HTTPException(status_code=503, detail=f"{collector.name} is not configured")
-    return await build_change_report(collector, FRIEDBERG["name"], persist=persist)
+    try:
+        return await build_change_report(collector, FRIEDBERG["name"], persist=persist)
+    except httpx.HTTPStatusError as error:
+        raise HTTPException(status_code=502, detail={
+            "source": collector.name,
+            "upstream_status": error.response.status_code,
+            "message": "DB API request failed; verify the product subscription for this application",
+        }) from error
 
 @app.get("/stations/friedberg-hess/change-report/stada")
 async def stada_change_report(persist: bool = False):

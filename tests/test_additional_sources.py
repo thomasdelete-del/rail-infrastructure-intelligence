@@ -42,6 +42,14 @@ def test_stada_maps_master_data_and_rejects_bavaria():
     assert parse_stada_station(payload) == []
 
 
+def test_stada_accepts_wrapped_result_and_string_station_number():
+    station = {"number": "1930", "name": "Friedberg (Hessen)",
+               "evaNumbers": [{"number": "8000111", "isMain": True}],
+               "ril100Identifiers": [{"rilIdentifier": "FFG", "isMain": True}]}
+    observations = parse_stada_station({"result": [station]})
+    assert next(item.value for item in observations if item.attribute == "station_number") == 1930
+
+
 def test_fasta_creates_separate_facility_observations():
     payload = {"facilities": [{"equipmentnumber": 4711, "stationnumber": 1930, "type": "ELEVATOR",
                                "state": "ACTIVE", "description": "Aufzug zu Gleis 1",

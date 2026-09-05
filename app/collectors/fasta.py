@@ -12,7 +12,7 @@ def parse_fasta_facilities(data: dict[str, Any] | list[dict[str, Any]]) -> list[
     facilities = data if isinstance(data, list) else data.get("facilities", [])
     observations: list[CollectedObservation] = []
     for facility in facilities:
-        if facility.get("stationnumber") != FRIEDBERG_HESS.station_number or facility.get("equipmentnumber") is None:
+        if str(facility.get("stationnumber")) != str(FRIEDBERG_HESS.station_number) or facility.get("equipmentnumber") is None:
             continue
         number = facility["equipmentnumber"]
         attributes = {"name": facility.get("description"),

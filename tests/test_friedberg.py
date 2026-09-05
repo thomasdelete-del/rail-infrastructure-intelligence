@@ -14,6 +14,10 @@ def test_rejects_other_friedbergs():
     assert not is_friedberg_hess("Friedberg Süd")
 
 
+def test_accepts_unabbreviated_hessen_with_station_number():
+    assert is_friedberg_hess("Friedberg (Hessen)", 1930)
+
+
 def test_complete_platform_edge_inventory():
     tracks = {edge["track"] for edge in FRIEDBERG["platform_edges"]}
     assert tracks == {"1", "1a", "2", "4", "5", "7", "8", "10", "11", "12"}
