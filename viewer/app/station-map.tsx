@@ -41,10 +41,11 @@ function escapeHtml(value: string) {
 
 export type CoordinateEdit = { objectKey: string; coordinateType: 'start' | 'end'; title: string };
 
-export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, onBeginCoordinateEdit, onCoordinateChange, onCancelEdit }: {
+export function StationMap({ points, focusObjectKey, coordinateEdit, aerialReviewRequest, onSelect, onBeginCoordinateEdit, onCoordinateChange, onCancelEdit }: {
   points: StationMapPoint[];
   focusObjectKey: string | null;
   coordinateEdit: CoordinateEdit | null;
+  aerialReviewRequest: { objectKey: string; nonce: number } | null;
   onSelect: (objectKey: string) => void;
   onBeginCoordinateEdit: (edit: CoordinateEdit) => void;
   onCoordinateChange: (edit: CoordinateEdit, latitude: number, longitude: number) => void;
@@ -108,6 +109,10 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
     satelliteLayerRef.current?.setOpacity(imagery === 'satellite' ? imageryOpacity / 100 : 0);
     aerialLayerRef.current?.setOpacity(imagery === 'official' ? imageryOpacity / 100 : 0);
   }, [imagery, imageryOpacity, mapReady]);
+
+  useEffect(() => {
+    if (aerialReviewRequest) setImagery('official');
+  }, [aerialReviewRequest]);
 
   useEffect(() => {
     if (!mapReady || !markerLayerRef.current) return;
