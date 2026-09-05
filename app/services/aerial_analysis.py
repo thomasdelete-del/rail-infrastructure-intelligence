@@ -304,7 +304,10 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
         corrected_end = result["candidate_end"]
         start_metric = np.array(_mercator(corrected_start["latitude"], corrected_start["longitude"]), dtype=float)
         end_metric = np.array(_mercator(corrected_end["latitude"], corrected_end["longitude"]), dtype=float)
-        _recompute_candidate_metrics(result, start_metric, end_metric, ground_scale, osm_length)
+        _recompute_candidate_metrics(
+            result, start_metric, end_metric, ground_scale,
+            float(result["osm_chord_length_m"]),
+        )
     result.update({
         "station": "Friedberg (Hess)", "track": track,
         "osm": {"type": element["type"], "id": element["id"], "url": f"https://www.openstreetmap.org/{element['type']}/{element['id']}"},
