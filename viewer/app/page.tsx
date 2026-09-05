@@ -142,6 +142,15 @@ function PlatformRow({ name, edges, index }: { name: string; edges: string[]; in
 function PlatformDataTable({ reference, inventory }: { reference: ReferenceStation | null; inventory: Inventory | null }) {
   const value = (edge: ReferenceEdge, attribute: string) => edge.observations.find((item) => item.attribute === attribute);
   const osmValue = (edge: ReferenceEdge, attribute: string) => inventory?.objects.find((item) => item.object_key === edge.object_id)?.observations.filter((item) => item.attribute === attribute && item.source_key === 'openstreetmap').at(-1);
+  const comparison = (edge: ReferenceEdge) => {
+    const osm = Number(osmValue(edge, 'construction_length')?.value);
+    const db = Number(value(edge, 'net_construction_length')?.value);
+    if (!Number.isFinite(osm) || !Number.isFinite(db) || db <= 0) return null;
+    const delta = osm - db;
+    const percent = Math.abs(delta) / db * 100;
+    return { delta, percent, level: percent <= 5 ? 'low' : percent <= 15 ? 'check' : 'high' } as const;
+  };
+  const comparisons = reference?.platform_edges.map(comparison).filter(Boolean) ?? [];
   const format = (observation?: ReferenceObservation | Evidence) => {
     if (!observation) return null;
     if (typeof observation.value === 'object' && observation.value) {
@@ -152,12 +161,12 @@ function PlatformDataTable({ reference, inventory }: { reference: ReferenceStati
   };
   const cell = (observation: ReferenceObservation | Evidence | undefined, source: string) => observation ? <div className="data-value"><strong>{format(observation)}</strong><span>{source}</span></div> : <span className="data-missing">Nicht geliefert</span>;
   return <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-    <div className="flex flex-col justify-between gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten je Gleis</h2><p className="mt-1 text-sm text-muted-foreground">Maße und Geokoordinaten mit klarer Kennzeichnung fehlender Quelldaten</p></div><span className="text-xs font-semibold text-muted-foreground">DB InfraGO · Stand 17.08.2026</span></div>
-    <div className="platform-data-scroll"><table className="platform-data-table"><thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge</th><th>Nettobaulänge</th><th>Nutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead><tbody>
-      {reference?.platform_edges.map((edge) => <tr key={edge.object_id}><td><span className="track-pill">Gleis {edge.track}</span></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td>{cell(osmValue(edge, 'construction_length'), 'OSM · berechnet')}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{value(edge, 'usable_length') ? cell(value(edge, 'usable_length'), 'DB InfraGO ISR') : <div className="data-value"><span className="data-missing">ISR-Zugang erforderlich</span><span>DB InfraGO ISR</span></div>}</td><td>{cell(osmValue(edge, 'start_coordinates'), 'OSM')}</td><td>{cell(osmValue(edge, 'end_coordinates'), 'OSM')}</td></tr>)}
-      {!reference ? Array.from({ length: 4 }, (_, index) => <tr key={index}><td colSpan={7}><div className="h-8 animate-pulse rounded bg-muted"/></td></tr>) : null}
+    <div className="flex flex-col justify-between gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten und Plausibilitätscheck</h2><p className="mt-1 text-sm text-muted-foreground">DB-Maße gegen OSM-Geometrie; Endpunkte können oben direkt über dem Luftbild geprüft werden.</p></div><div className="comparison-summary"><span className="comparison-low">{comparisons.filter((item) => item?.level === 'low').length} geringe</span><span className="comparison-check">{comparisons.filter((item) => item?.level === 'check').length} prüfen</span><span className="comparison-high">{comparisons.filter((item) => item?.level === 'high').length} auffällig</span></div></div>
+    <div className="platform-data-scroll"><table className="platform-data-table"><thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Abweichung</th><th>Nutzlänge ISR</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead><tbody>
+      {reference?.platform_edges.map((edge) => { const deviation = comparison(edge); return <tr key={edge.object_id} className={deviation?.level === 'high' ? 'row-deviation-high' : undefined}><td><span className="track-pill">Gleis {edge.track}</span></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td>{cell(osmValue(edge, 'construction_length'), 'OSM · Geometrie')}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{deviation ? <div className={`deviation deviation-${deviation.level}`}><strong>{deviation.delta >= 0 ? '+' : ''}{deviation.delta.toFixed(1)} m</strong><span>{deviation.percent.toFixed(1)}% · {deviation.level === 'low' ? 'gering' : deviation.level === 'check' ? 'prüfen' : 'auffällig'}</span></div> : <span className="data-missing">Nicht vergleichbar</span>}</td><td>{value(edge, 'usable_length') ? cell(value(edge, 'usable_length'), 'DB InfraGO ISR') : <div className="data-value"><span className="data-missing">ISR-Abruf ausstehend</span><span>DB InfraGO ISR</span></div>}</td><td>{cell(osmValue(edge, 'start_coordinates'), 'OSM')}</td><td>{cell(osmValue(edge, 'end_coordinates'), 'OSM')}</td></tr>; })}
+      {!reference ? Array.from({ length: 4 }, (_, index) => <tr key={index}><td colSpan={8}><div className="h-8 animate-pulse rounded bg-muted"/></td></tr>) : null}
     </tbody></table></div>
-    <div className="platform-data-note"><AlertTriangle size={16}/><p>Die betriebliche Bahnsteignutzlänge wird im kostenpflichtigen ISR Data Service geführt; sie wird erst nach freigeschaltetem Produktzugang übernommen. Die Nettobaulänge ersetzt sie nicht.</p></div>
+    <div className="platform-data-note"><AlertTriangle size={16}/><p>Bewertung: bis 5% geringe Abweichung, bis 15% prüfen, darüber auffällig. OSM-Geometrielänge und DB-Nettobaulänge sind nicht definitionsgleich; die Kennzeichnung ist ein Prüfhinweis, kein Vermessungsnachweis. Für Endpunkte Satellit oben einschalten.</p></div>
   </section>;
 }
 

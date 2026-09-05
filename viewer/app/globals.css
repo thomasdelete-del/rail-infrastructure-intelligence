@@ -97,7 +97,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .source-state-active { background: #e8f6ef; color: #176944; }
 .source-state-pending { background: #fff1df; color: #87420f; }
 .platform-data-scroll { overflow-x: auto; }
-.platform-data-table { min-width: 1120px; width: 100%; border-collapse: collapse; font-size: .875rem; }
+.platform-data-table { min-width: 1340px; width: 100%; border-collapse: collapse; font-size: .875rem; }
 .platform-data-table th { background: #f2f6f7; color: #566872; font-size: .75rem; letter-spacing: .035em; text-align: left; text-transform: uppercase; }
 .platform-data-table th, .platform-data-table td { border-right: 1px solid #dde5e8; border-bottom: 1px solid #dde5e8; padding: 13px 15px; vertical-align: middle; }
 .platform-data-table th:last-child, .platform-data-table td:last-child { border-right: 0; }
@@ -107,6 +107,16 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .data-value { display: flex; flex-direction: column; gap: 3px; }
 .data-value strong { color: #18313f; font-family: var(--font-app-mono), monospace; font-size: .8125rem; white-space: nowrap; }
 .data-value span { color: #60717a; font-size: .75rem; font-weight: 600; }
+.comparison-summary { display: flex; flex-wrap: wrap; gap: 7px; font-size: .75rem; font-weight: 750; }
+.comparison-summary span { border-radius: 999px; padding: 5px 9px; }
+.comparison-low { background: #e8f6ef; color: #176944; }
+.comparison-check { background: #fff1df; color: #87420f; }
+.comparison-high { background: #fde9e6; color: #a63325; }
+.deviation { display: flex; flex-direction: column; gap: 3px; white-space: nowrap; }
+.deviation strong { font-family: var(--font-app-mono), monospace; font-size: .8125rem; }
+.deviation span { font-size: .72rem; font-weight: 700; }
+.deviation-low { color: #176944; } .deviation-check { color: #87420f; } .deviation-high { color: #a63325; }
+.row-deviation-high { background: #fff8f7; }
 .platform-data-note { display: flex; align-items: flex-start; gap: 9px; border-top: 1px solid #ead7c6; background: #fff9f3; padding: 13px 18px; color: #73543d; font-size: .8125rem; line-height: 1.45; }
 .platform-data-note svg { margin-top: 1px; flex: none; color: #b25b18; }
 
