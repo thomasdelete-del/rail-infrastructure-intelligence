@@ -190,6 +190,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .map-review-osm { background: #fff4dc; color: #7d4a00; }
 .map-review-proposal { background: #dcf8ff; color: #00677c; }
 .map-review-deviation { background: #ffe9e7; color: #9b2c23; }
+.map-review-confirmed { background: #e5f7ed; color: #176944; }
 @media (max-width: 640px) { .platform-check-panel { align-items: stretch; flex-direction: column; padding: 14px 18px; } .platform-check-switch { width: 100%; } }
 
 @media (max-width: 520px) { .status-ok { max-width: 34px; overflow: hidden; padding: 8px; } }

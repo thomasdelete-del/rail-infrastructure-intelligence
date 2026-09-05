@@ -82,32 +82,40 @@ def analyse_platform_crop(
                                borderMode=cv2.BORDER_CONSTANT, borderValue=0)
             scores.append(float(np.mean(values)))
         smoothed = cv2.GaussianBlur(np.array(scores, dtype=np.float32).reshape(1, -1), (9, 1), 0).ravel()
-        peak_index = int(np.argmax(smoothed))
         baseline, spread = float(np.median(smoothed)), float(np.std(smoothed))
-        prominence = (float(smoothed[peak_index]) - baseline) / max(spread, 1.0)
-        if prominence < 1.8 or peak_index < 3 or peak_index > len(offsets) - 4:
-            return None
+        zero_indices = np.flatnonzero(np.abs(offsets) <= 3.0)
+        near_index = int(zero_indices[np.argmax(smoothed[zero_indices])])
+        global_index = int(np.argmax(smoothed))
+        near_prominence = (float(smoothed[near_index]) - baseline) / max(spread, 1.0)
+        global_score = max(float(smoothed[global_index]), 1.0)
+        # A visible terminating edge at the existing OSM point is stronger evidence
+        # than a more contrast-rich object elsewhere in the search window.
+        if near_prominence >= 0.75 and float(smoothed[near_index]) >= global_score * 0.42:
+            peak_index, prominence = near_index, near_prominence
+        else:
+            peak_index = global_index
+            prominence = (float(smoothed[peak_index]) - baseline) / max(spread, 1.0)
         shift = float(offsets[peak_index])
+        if prominence < 1.8 or abs(shift) > 8 or peak_index < 3 or peak_index > len(offsets) - 4:
+            return None
         return origin + axis * shift, shift, prominence
 
     start_detection, end_detection = detect_endpoint(start_xy), detect_endpoint(end_xy)
     if not start_detection or not end_detection:
-        return {"status": "insufficient_evidence", "confidence": 0.0,
-                "reason": "Bahnsteiganfang oder Bahnsteigende ist im lokalen Luftbildausschnitt nicht eindeutig erkennbar",
-                "method": "Lokale Endpunktsuche ±35 m entlang der OSM-Bahnsteigachse"}
+        result: dict[str, Any] = {"status": "insufficient_evidence", "confidence": 0.0,
+                                  "reason": "Nur einer oder keiner der beiden OSM-Endpunkte ist im Luftbild eindeutig bestätigt",
+                                  "method": "OSM-zentrierte lokale Endpunktprüfung; Anfang und Ende getrennt"}
+        if start_detection:
+            result.update(candidate_start=_latlon(*start_detection[0]), start_shift_m=round(start_detection[1], 1),
+                          start_confidence=round(min(0.9, start_detection[2] / 4.5), 2))
+        if end_detection:
+            result.update(candidate_end=_latlon(*end_detection[0]), end_shift_m=round(end_detection[1], 1),
+                          end_confidence=round(min(0.9, end_detection[2] / 4.5), 2))
+        return result
     candidate_start_xy, start_shift, start_prominence = start_detection
     candidate_end_xy, end_shift, end_prominence = end_detection
     candidate_length = float(np.linalg.norm(candidate_end_xy - candidate_start_xy))
     endpoint_shift = max(abs(start_shift), abs(end_shift))
-    if endpoint_shift > 8:
-        return {
-            "status": "insufficient_evidence",
-            "confidence": 0.0,
-            "reason": "Bildkante liegt mehr als 8 m vom OSM-Endpunkt entfernt und ist ohne zweite Bestätigung nicht als Bahnsteigende belastbar",
-            "start_candidate_shift_m": round(start_shift, 1),
-            "end_candidate_shift_m": round(end_shift, 1),
-            "method": "Konservative lokale Endpunktsuche ±35 m; Fernkandidaten werden verworfen",
-        }
     length_delta = candidate_length - osm_length
     confidence = round(min(0.9, min(start_prominence, end_prominence) / 4.5), 2)
     status = "plausible" if endpoint_shift <= 3 else "check"

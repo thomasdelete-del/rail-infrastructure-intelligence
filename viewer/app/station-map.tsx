@@ -40,7 +40,7 @@ function escapeHtml(value: string) {
 }
 
 export type CoordinateEdit = { objectKey: string; coordinateType: 'start' | 'end'; title: string };
-type AerialReviewAnalysis = { candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; maximum_endpoint_shift_m?: number; confidence?: number };
+type AerialReviewAnalysis = { candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; start_shift_m?: number; end_shift_m?: number; maximum_endpoint_shift_m?: number; confidence?: number };
 
 export function StationMap({ points, focusObjectKey, coordinateEdit, aerialReviewRequest, onSelect, onBeginCoordinateEdit, onCoordinateChange, onCancelEdit }: {
   points: StationMapPoint[];
@@ -185,22 +185,24 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
     if (original.length < 2) return;
     void import('leaflet').then((L) => {
       if (!mapRef.current || !reviewLayerRef.current) return;
-      const osmCoordinates = original.map((point) => [point.latitude, point.longitude] as [number, number]);
+      const startPoint = original.find((point) => point.coordinateType === 'start')!;
+      const endPoint = original.find((point) => point.coordinateType === 'end')!;
+      const osmCoordinates: [number, number][] = [[startPoint.latitude, startPoint.longitude], [endPoint.latitude, endPoint.longitude]];
       L.polyline(osmCoordinates, { color: '#f59e0b', weight: 5, opacity: .95, dashArray: '10 7' }).bindTooltip('OSM-Bahnsteigkante', { permanent: true, direction: 'center', className: 'map-review-label map-review-osm' }).addTo(reviewLayerRef.current);
       const allCoordinates = [...osmCoordinates];
-      if (analysis?.candidate_start && analysis.candidate_end) {
-        const proposed: [number, number][] = [[analysis.candidate_start.latitude, analysis.candidate_start.longitude], [analysis.candidate_end.latitude, analysis.candidate_end.longitude]];
-        const direct = mapRef.current.distance(osmCoordinates[0], proposed[0]) + mapRef.current.distance(osmCoordinates[1], proposed[1]);
-        const reversed = mapRef.current.distance(osmCoordinates[0], proposed[1]) + mapRef.current.distance(osmCoordinates[1], proposed[0]);
-        if (reversed < direct) proposed.reverse();
-        L.polyline(proposed, { color: '#00a6c7', weight: 6, opacity: .95 }).bindTooltip(`Luftbild-Vorschlag${analysis.candidate_length_m ? ` · ${analysis.candidate_length_m.toFixed(1)} m` : ''}`, { permanent: true, direction: 'center', className: 'map-review-label map-review-proposal' }).addTo(reviewLayerRef.current);
-        proposed.forEach((coordinate, index) => {
-          const shift = mapRef.current!.distance(osmCoordinates[index], coordinate);
-          L.polyline([osmCoordinates[index], coordinate], { color: '#d32f2f', weight: 3, opacity: .95, dashArray: '4 5' }).bindTooltip(`Abweichung ${shift.toFixed(1)} m`, { permanent: true, direction: 'center', className: 'map-review-label map-review-deviation' }).addTo(reviewLayerRef.current!);
-          L.circleMarker(coordinate, { radius: 7, color: '#fff', weight: 2, fillColor: '#00a6c7', fillOpacity: 1 }).addTo(reviewLayerRef.current!);
-        });
-        allCoordinates.push(...proposed);
+      const proposed: Array<[number, number] | null> = [analysis?.candidate_start ? [analysis.candidate_start.latitude, analysis.candidate_start.longitude] : null, analysis?.candidate_end ? [analysis.candidate_end.latitude, analysis.candidate_end.longitude] : null];
+      if (proposed[0] && proposed[1]) {
+        L.polyline([proposed[0], proposed[1]], { color: '#00a6c7', weight: 6, opacity: .95 }).bindTooltip(`Luftbild-Vorschlag${analysis?.candidate_length_m ? ` · ${analysis.candidate_length_m.toFixed(1)} m` : ''}`, { permanent: true, direction: 'center', className: 'map-review-label map-review-proposal' }).addTo(reviewLayerRef.current);
       }
+      proposed.forEach((coordinate, index) => {
+        if (coordinate) {
+          const shift = mapRef.current!.distance(osmCoordinates[index], coordinate);
+          const confirmed = shift <= 3;
+          L.polyline([osmCoordinates[index], coordinate], { color: confirmed ? '#20845a' : '#d32f2f', weight: 3, opacity: .95, dashArray: '4 5' }).bindTooltip(confirmed ? 'OSM im Luftbild bestätigt' : `Abweichung ${shift.toFixed(1)} m`, { permanent: true, direction: 'center', className: `map-review-label ${confirmed ? 'map-review-confirmed' : 'map-review-deviation'}` }).addTo(reviewLayerRef.current!);
+          L.circleMarker(coordinate, { radius: 7, color: '#fff', weight: 2, fillColor: '#00a6c7', fillOpacity: 1 }).addTo(reviewLayerRef.current!);
+          allCoordinates.push(coordinate);
+        }
+      });
       mapRef.current.fitBounds(L.latLngBounds(allCoordinates).pad(.35), { maxZoom: 23, animate: true });
     });
   }, [aerialReviewRequest, mapReady, points]);

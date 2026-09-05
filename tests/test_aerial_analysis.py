@@ -24,9 +24,7 @@ def test_detects_parallel_aerial_edges_and_proposes_longer_extent():
 
     assert result["status"] == "insufficient_evidence"
     assert result["confidence"] == 0
-    assert "mehr als 8 m" in result["reason"]
-    assert abs(result["start_candidate_shift_m"]) >= 15
-    assert abs(result["end_candidate_shift_m"]) >= 15
+    assert "OSM-Endpunkte" in result["reason"]
 
 
 def test_returns_insufficient_evidence_for_blank_crop():
@@ -58,4 +56,4 @@ def test_does_not_infer_full_length_without_visible_local_endpoints():
 
     assert result["status"] == "insufficient_evidence"
     assert result["confidence"] == 0
-    assert "nicht eindeutig" in result["reason"]
+    assert "eindeutig" in result["reason"]
