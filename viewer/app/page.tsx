@@ -9,6 +9,9 @@ type InfraObject = { object_key: string; object_type: string; parent_object_key:
 type Inventory = { station: string; object_count: number; objects: InfraObject[] };
 type State = { station: string; object_count: number; object_types: Record<string, number>; platform_edges: string[]; equipment_types: Record<string, number>; conflict_count: number; data_gaps: { code: string; source: string }[] };
 type SourceStatus = { key: string; name: string; configured: boolean; quality_class: string };
+type ReferenceObservation = { attribute: string; value: unknown; unit: string | null; source_id: string; note?: string };
+type ReferenceEdge = { object_id: string; track: string; observations: ReferenceObservation[] };
+type ReferenceStation = { platform_edges: ReferenceEdge[]; sources: { id: string; publisher: string; source_date: string; url: string }[] };
 
 function currentValue(object: InfraObject, attribute: string) {
   const values = object.observations.filter((item) => item.attribute === attribute);
@@ -29,6 +32,7 @@ export default function Home() {
   const [state, setState] = useState<State | null>(null);
   const [inventory, setInventory] = useState<Inventory | null>(null);
   const [sources, setSources] = useState<SourceStatus[]>([]);
+  const [reference, setReference] = useState<ReferenceStation | null>(null);
   const [error, setError] = useState(false);
   const [updated, setUpdated] = useState<Date | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -39,14 +43,15 @@ export default function Home() {
   async function load() {
     setRefreshing(true); setError(false);
     try {
-      const [stateResponse, inventoryResponse, sourceResponse] = await Promise.all([
+      const [stateResponse, inventoryResponse, sourceResponse, referenceResponse] = await Promise.all([
         fetch(`${API}/stations/friedberg-hess/state/openstation`, { cache: 'no-store' }),
         fetch(`${API}/stations/friedberg-hess/infrastructure/openstation`, { cache: 'no-store' }),
         fetch(`${API}/stations/friedberg-hess/source-status`, { cache: 'no-store' }),
+        fetch(`${API}/stations/friedberg-hess`, { cache: 'no-store' }),
       ]);
-      if (!stateResponse.ok || !inventoryResponse.ok || !sourceResponse.ok) throw new Error('API unavailable');
+      if (!stateResponse.ok || !inventoryResponse.ok || !sourceResponse.ok || !referenceResponse.ok) throw new Error('API unavailable');
       const sourceData = await sourceResponse.json();
-      setState(await stateResponse.json()); setInventory(await inventoryResponse.json()); setSources(sourceData.sources); setUpdated(new Date());
+      setState(await stateResponse.json()); setInventory(await inventoryResponse.json()); setSources(sourceData.sources); setReference(await referenceResponse.json()); setUpdated(new Date());
     } catch { setError(true); } finally { setRefreshing(false); }
   }
 
@@ -86,6 +91,7 @@ export default function Home() {
           <section className="rounded-xl border border-[#e9c9ad] bg-[#fff9f3] shadow-sm"><div className="flex items-center gap-2 border-b border-[#efd8c5] px-5 py-4 text-[#87420f]"><AlertTriangle size={18}/><h2 className="text-lg font-bold">Datenlücken</h2></div><div className="space-y-4 p-5">{state?.data_gaps.map((gap) => { const copy = gapLabels[gap.code] ?? { title: gap.code, text: gap.source }; return <div key={gap.code} className="flex gap-3"><MapPinOff size={17} className="mt-0.5 shrink-0 text-[#b25b18]"/><div><p className="text-sm font-semibold">{copy.title}</p><p className="mt-0.5 text-sm leading-5 text-[#73543d]">{copy.text}</p></div></div>; })}</div></section>
         </div>
       </div>
+      <PlatformDataTable reference={reference}/>
       <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="border-b border-border px-5 py-5 sm:px-6"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h2 className="text-lg font-bold">Objektkatalog</h2><p className="mt-1 text-sm text-muted-foreground">Infrastruktur durchsuchen und Evidenz im Detail prüfen</p></div><label className="search-box"><Search size={17}/><span className="sr-only">Objekte durchsuchen</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, Gleis oder NeTEx-ID"/>{query ? <button aria-label="Suche löschen" onClick={() => setQuery('')}><X size={16}/></button> : null}</label></div>
           <div className="mt-4 flex flex-wrap gap-2" aria-label="Objekttyp filtern"><Filter size={16} className="mt-2 text-muted-foreground"/>{filters.map((filter) => <button key={filter} aria-pressed={typeFilter === filter} onClick={() => setTypeFilter(filter)} className="filter-button">{filter === 'all' ? 'Alle' : typeLabels[filter]}{filter !== 'all' && state ? <span>{state.object_types[filter] ?? 0}</span> : null}</button>)}</div>
@@ -106,6 +112,20 @@ export default function Home() {
 
 function Metric({ label, value, accent }: { label: string; value?: number; accent: string }) { return <div className={`metric metric-${accent}`}><p>{label}</p><strong>{value ?? '–'}</strong></div>; }
 function PlatformRow({ name, edges, index }: { name: string; edges: string[]; index: number }) { return <div className="platform-row"><div className="platform-index">B{index}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-muted-foreground">{name}</p><div className="mt-2 flex flex-wrap gap-2">{edges.map((edge) => <span key={edge} className="track-pill">Gleis {edge}</span>)}</div></div><div className="hidden h-1 w-20 rounded-full bg-[#f5a623] sm:block"/></div>; }
+
+function PlatformDataTable({ reference }: { reference: ReferenceStation | null }) {
+  const value = (edge: ReferenceEdge, attribute: string) => edge.observations.find((item) => item.attribute === attribute);
+  const format = (observation?: ReferenceObservation) => observation ? `${String(observation.value)}${observation.unit ? ` ${observation.unit}` : ''}` : null;
+  const missing = <span className="data-missing">Nicht geliefert</span>;
+  return <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+    <div className="flex flex-col justify-between gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten je Gleis</h2><p className="mt-1 text-sm text-muted-foreground">Maße und Geokoordinaten mit klarer Kennzeichnung fehlender Quelldaten</p></div><span className="text-xs font-semibold text-muted-foreground">DB InfraGO · Stand 17.08.2026</span></div>
+    <div className="platform-data-scroll"><table className="platform-data-table"><thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge</th><th>Nettobaulänge</th><th>Nutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead><tbody>
+      {reference?.platform_edges.map((edge) => <tr key={edge.object_id}><td><span className="track-pill">Gleis {edge.track}</span></td><td>{format(value(edge, 'platform_height')) ?? missing}</td><td>{format(value(edge, 'construction_length')) ?? missing}</td><td><strong>{format(value(edge, 'net_construction_length'))}</strong></td><td>{format(value(edge, 'usable_length')) ?? missing}</td><td>{format(value(edge, 'start_coordinates')) ?? missing}</td><td>{format(value(edge, 'end_coordinates')) ?? missing}</td></tr>)}
+      {!reference ? Array.from({ length: 4 }, (_, index) => <tr key={index}><td colSpan={7}><div className="h-8 animate-pulse rounded bg-muted"/></td></tr>) : null}
+    </tbody></table></div>
+    <div className="platform-data-note"><AlertTriangle size={16}/><p>Die Nettobaulänge ist laut DB nicht als Zugnutzlänge geeignet. Anfangs- und Endkoordinaten werden nicht aus einem Mittelpunkt abgeleitet.</p></div>
+  </section>;
+}
 
 function ObjectDetail({ object }: { object: InfraObject | null }) {
   if (!object) return <div className="grid place-items-center p-8 text-center text-muted-foreground"><p>Wählen Sie ein Objekt aus.</p></div>;
