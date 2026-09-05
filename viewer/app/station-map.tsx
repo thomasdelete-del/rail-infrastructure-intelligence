@@ -116,7 +116,10 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
   }, [imagery, imageryOpacity, mapReady]);
 
   useEffect(() => {
-    if (aerialReviewRequest) setImagery('official');
+    if (aerialReviewRequest) {
+      setImagery('official');
+      setImageryOpacity(100);
+    }
   }, [aerialReviewRequest]);
 
   useEffect(() => {
@@ -138,7 +141,8 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
           fillColor: point.isDraft ? '#f5a623' : point.objectType === 'platform_edge' ? platformCoordinateColors[point.coordinateType] : markerColors[point.objectType] ?? '#445b66',
           fillOpacity: 0.96,
         });
-        marker.bindTooltip(escapeHtml(point.title), { direction: 'top', offset: [0, -7], permanent: focused, className: focused ? 'focused-platform-label' : '' });
+        const endpointReview = aerialReviewRequest?.objectKey === point.objectKey && Boolean(aerialReviewRequest.coordinateType);
+        marker.bindTooltip(escapeHtml(point.title), { direction: 'top', offset: [0, -7], permanent: focused && !endpointReview, className: focused && !endpointReview ? 'focused-platform-label' : '' });
         const coordinateLabel = point.objectType === 'platform_edge' && point.coordinateType === 'position' ? 'Gleiskoordinate' : coordinateLabels[point.coordinateType];
         marker.bindPopup(`<strong>${escapeHtml(point.title)}</strong><br>${escapeHtml(typeLabels[point.objectType] ?? point.objectType)} · ${coordinateLabel}${point.isDraft ? ' · Aktualisiert' : ''}<br><small>${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}<br>${point.isDraft ? 'Manueller Prüfvorschlag' : 'Quelle: OpenStreetMap'}</small>`);
         marker.on('click', () => onSelect(point.objectKey));
@@ -160,7 +164,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
       }
     });
     return () => { cancelled = true; };
-  }, [focusObjectKey, mapReady, onBeginCoordinateEdit, onSelect, points]);
+  }, [aerialReviewRequest, focusObjectKey, mapReady, onBeginCoordinateEdit, onSelect, points]);
 
   useEffect(() => {
     if (!focusObjectKey) { lastFocusedObjectRef.current = null; return; }
@@ -188,6 +192,11 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
       const startPoint = original.find((point) => point.coordinateType === 'start')!;
       const endPoint = original.find((point) => point.coordinateType === 'end')!;
       const osmCoordinates: [number, number][] = [[startPoint.latitude, startPoint.longitude], [endPoint.latitude, endPoint.longitude]];
+      if (aerialReviewRequest.coordinateType) {
+        const target = aerialReviewRequest.coordinateType === 'start' ? osmCoordinates[0] : osmCoordinates[1];
+        mapRef.current.setView(target, 21, { animate: true });
+        return;
+      }
       L.polyline(osmCoordinates, { color: '#f59e0b', weight: 5, opacity: .95, dashArray: '10 7' }).bindTooltip('OSM-Bahnsteigkante', { permanent: true, direction: 'center', className: 'map-review-label map-review-osm' }).addTo(reviewLayerRef.current);
       const allCoordinates = [...osmCoordinates];
       const proposed: Array<[number, number] | null> = [analysis?.candidate_start ? [analysis.candidate_start.latitude, analysis.candidate_start.longitude] : null, analysis?.candidate_end ? [analysis.candidate_end.latitude, analysis.candidate_end.longitude] : null];
@@ -203,15 +212,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
           allCoordinates.push(coordinate);
         }
       });
-      const targetType = aerialReviewRequest.coordinateType;
-      if (targetType) {
-        const originalTarget = targetType === 'start' ? osmCoordinates[0] : osmCoordinates[1];
-        const candidateTarget = targetType === 'start' ? proposed[0] : proposed[1];
-        const targetBounds = L.latLngBounds(candidateTarget ? [originalTarget, candidateTarget] : [originalTarget]);
-        mapRef.current.fitBounds(targetBounds.pad(1.2), { maxZoom: 24, animate: true });
-      } else {
-        mapRef.current.fitBounds(L.latLngBounds(allCoordinates).pad(.35), { maxZoom: 23, animate: true });
-      }
+      mapRef.current.fitBounds(L.latLngBounds(allCoordinates).pad(.35), { maxZoom: 23, animate: true });
     });
   }, [aerialReviewRequest, mapReady, points]);
 
