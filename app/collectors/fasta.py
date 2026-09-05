@@ -51,5 +51,7 @@ class FaStaCollector(Collector):
             return []
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.get(self.endpoint, headers={"DB-Client-ID": self.client_id, "DB-Api-Key": self.api_key})
+            if response.status_code == 404:
+                return []
             response.raise_for_status()
             return parse_fasta_facilities(response.json())
