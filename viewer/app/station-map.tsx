@@ -64,15 +64,15 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
     let cancelled = false;
     void import('leaflet').then((L) => {
       if (cancelled || !containerRef.current) return;
-      const map = L.map(containerRef.current, { zoomControl: true, minZoom: 14, maxZoom: 22 }).setView(FRIEDBERG_CENTER, 17);
+      const map = L.map(containerRef.current, { zoomControl: true, doubleClickZoom: false, minZoom: 14, maxZoom: 24 }).setView(FRIEDBERG_CENTER, 17);
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxNativeZoom: 19,
-        maxZoom: 22,
+        maxZoom: 24,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap-Mitwirkende</a>',
       }).addTo(map);
       const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         maxNativeZoom: 19,
-        maxZoom: 22,
+        maxZoom: 24,
         opacity: 0,
         attribution: 'Satellitenbild &copy; Esri, Maxar, Earthstar Geographics und weitere',
       }).addTo(map);
@@ -81,7 +81,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
         format: 'image/png',
         transparent: true,
         version: '1.1.1',
-        maxZoom: 22,
+        maxZoom: 24,
         opacity: 0,
         attribution: 'Luftbild: &copy; Hessische Verwaltung f&uuml;r Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
       }).addTo(map);
@@ -116,7 +116,9 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
       points.forEach((point) => {
         const endpoint = point.coordinateType !== 'position';
         const focused = point.objectKey === focusObjectKey;
-        const marker = L.circleMarker([point.latitude, point.longitude], {
+        const marker = point.isDraft ? L.marker([point.latitude, point.longitude], {
+          icon: L.divIcon({ className: 'coordinate-draft-marker', html: '<span></span>', iconSize: [20, 20], iconAnchor: [10, 10] }),
+        }) : L.circleMarker([point.latitude, point.longitude], {
           radius: point.isDraft ? 8 : focused ? 10 : endpoint ? 5 : point.objectType === 'stop_place' ? 9 : 6,
           color: point.isDraft ? '#7c2d92' : focused ? '#f5a623' : '#ffffff',
           weight: point.isDraft || focused ? 4 : 2,
@@ -130,6 +132,8 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
         if (point.objectType === 'platform_edge' && point.coordinateType !== 'position') {
           const coordinateType = point.coordinateType;
           marker.on('dblclick', () => {
+            marker.closePopup();
+            mapRef.current?.closePopup();
             onSelect(point.objectKey);
             onBeginCoordinateEdit({ objectKey: point.objectKey, coordinateType, title: point.title });
           });
@@ -151,7 +155,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
     void import('leaflet').then((L) => {
       if (!mapRef.current) return;
       const bounds = L.latLngBounds(objectPoints.map((point) => [point.latitude, point.longitude] as [number, number]));
-      mapRef.current.fitBounds(bounds.pad(0.45), { maxZoom: 22, animate: true });
+      mapRef.current.fitBounds(bounds.pad(0.45), { maxZoom: 24, animate: true });
     });
   }, [focusObjectKey, mapReady, points]);
 
