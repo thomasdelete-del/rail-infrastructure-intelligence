@@ -207,6 +207,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .endpoint-review-nav small { color: #647985; font-size: .65rem; }
 .endpoint-learning-actions { display: flex; gap: 5px; margin-top: 4px; }
 .endpoint-learning-actions button { border: 1px solid #adc2cc; border-radius: 4px; background: #fff; padding: 3px 6px; color: #17465d; font-size: .65rem; cursor: pointer; }
+.endpoint-learning-actions .learning-correct-active { border-color: #11834f; background: #19a866; color: #fff; box-shadow: 0 0 0 3px rgb(25 168 102 / 22%), 0 0 12px rgb(25 168 102 / 55%); }
+.endpoint-learning-actions .learning-wrong-active { border-color: #b82f28; background: #d9473f; color: #fff; box-shadow: 0 0 0 3px rgb(217 71 63 / 20%), 0 0 12px rgb(217 71 63 / 50%); }
 @media (max-width: 640px) { .platform-check-panel { align-items: stretch; flex-direction: column; padding: 14px 18px; } .platform-check-switch { width: 100%; } }
 
 @media (max-width: 520px) { .status-ok { max-width: 34px; overflow: hidden; padding: 8px; } }

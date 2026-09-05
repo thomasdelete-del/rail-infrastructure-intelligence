@@ -67,6 +67,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
   const [imageryOpacity, setImageryOpacity] = useState(65);
   const [mapReady, setMapReady] = useState(false);
   const [learningMessage, setLearningMessage] = useState<string | null>(null);
+  const [feedbackSelections, setFeedbackSelections] = useState<Record<string, boolean>>({});
   const reviewEndpoints = points.filter((point) => point.objectType === 'platform_edge' && (point.coordinateType === 'start' || point.coordinateType === 'end'));
   const reviewIndex = aerialReviewRequest ? reviewEndpoints.findIndex((point) => point.objectKey === aerialReviewRequest.objectKey && point.coordinateType === aerialReviewRequest.coordinateType) : -1;
   const currentReviewPoint = reviewIndex >= 0 ? reviewEndpoints[reviewIndex] : null;
@@ -74,6 +75,8 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
   const currentResult = currentTrack ? aerialResults[currentTrack] : undefined;
   const currentShift = currentReviewPoint?.coordinateType === 'start' ? currentResult?.start_shift_m : currentResult?.end_shift_m;
   const currentConfidence = currentReviewPoint?.coordinateType === 'start' ? currentResult?.start_confidence : currentResult?.end_confidence;
+  const feedbackKey = currentReviewPoint ? `${currentReviewPoint.objectKey}:${currentReviewPoint.coordinateType}` : '';
+  const currentFeedback = feedbackKey ? feedbackSelections[feedbackKey] : undefined;
   const navigateReview = (direction: -1 | 1) => {
     if (!reviewEndpoints.length) return;
     const nextIndex = (Math.max(reviewIndex, 0) + direction + reviewEndpoints.length) % reviewEndpoints.length;
@@ -93,9 +96,19 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
         body: JSON.stringify({ track: currentTrack, endpoint, accepted, features }),
       });
       if (!response.ok) throw new Error();
+      setFeedbackSelections((current) => {
+        const next = { ...current, [feedbackKey]: accepted };
+        localStorage.setItem('friedberg-endpoint-feedback', JSON.stringify(next));
+        return next;
+      });
       setLearningMessage(accepted ? 'Als echter Abschluss gelernt' : 'Als Fehlkandidat gelernt');
     } catch { setLearningMessage('Bewertung konnte nicht gespeichert werden'); }
   };
+
+  useEffect(() => {
+    try { setFeedbackSelections(JSON.parse(localStorage.getItem('friedberg-endpoint-feedback') ?? '{}') as Record<string, boolean>); }
+    catch { setFeedbackSelections({}); }
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
@@ -289,7 +302,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
         <button type="button" className="map-icon-button" aria-label="Bahnhof zentrieren" title="Bahnhof zentrieren" onClick={resetView}><LocateFixed size={18}/></button>
       </div>
       {coordinateEdit ? <div className="coordinate-edit-banner"><Crosshair size={18}/><span><strong>{coordinateEdit.title}</strong>: neuen {coordinateEdit.coordinateType === 'start' ? 'Anfang' : 'Endpunkt'} in der Karte anklicken</span><button type="button" onClick={onCancelEdit} aria-label="Koordinatenänderung abbrechen"><X size={17}/></button></div> : null}
-      {currentReviewPoint ? <div className="endpoint-review-nav"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>{currentReviewPoint.title} · {currentReviewPoint.coordinateType === 'start' ? 'Anfang' : 'Ende'}</strong><span>{currentResult?.length_conflict ? 'Nicht bestätigt · Längenkonflikt' : currentShift === undefined ? 'Nicht eindeutig bestätigt' : Math.abs(currentShift) <= 3 ? `OSM-Kandidat · ${Math.round((currentConfidence ?? 0) * 100)}%` : `Abweichung ${currentShift >= 0 ? '+' : ''}${currentShift.toFixed(1)} m · ${Math.round((currentConfidence ?? 0) * 100)}%`}</span><small>{currentResult?.training_sample_count ? `Lernmodell: ${currentResult.training_sample_count} Bewertungen` : 'Lernmodell: Lernphase'}</small><div className="endpoint-learning-actions"><button type="button" onClick={() => void submitTrainingFeedback(true)}>Abschluss korrekt</button><button type="button" onClick={() => void submitTrainingFeedback(false)}>Kein Abschluss</button><button type="button" onClick={() => onBeginCoordinateEdit({ objectKey: currentReviewPoint.objectKey, coordinateType: currentReviewPoint.coordinateType as 'start' | 'end', title: currentReviewPoint.title })}>Richtigen Abschluss setzen</button></div>{learningMessage ? <small>{learningMessage}</small> : null}</div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
+      {currentReviewPoint ? <div className="endpoint-review-nav"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>{currentReviewPoint.title} · {currentReviewPoint.coordinateType === 'start' ? 'Anfang' : 'Ende'}</strong><span>{currentResult?.length_conflict ? 'Nicht bestätigt · Längenkonflikt' : currentShift === undefined ? 'Nicht eindeutig bestätigt' : Math.abs(currentShift) <= 3 ? `OSM-Kandidat · ${Math.round((currentConfidence ?? 0) * 100)}%` : `Abweichung ${currentShift >= 0 ? '+' : ''}${currentShift.toFixed(1)} m · ${Math.round((currentConfidence ?? 0) * 100)}%`}</span><small>{currentResult?.training_sample_count ? `Lernmodell: ${currentResult.training_sample_count} Bewertungen` : 'Lernmodell: Lernphase'}</small><div className="endpoint-learning-actions"><button type="button" className={currentFeedback === true ? 'learning-correct-active' : ''} aria-pressed={currentFeedback === true} onClick={() => void submitTrainingFeedback(true)}>Abschluss korrekt</button><button type="button" className={currentFeedback === false ? 'learning-wrong-active' : ''} aria-pressed={currentFeedback === false} onClick={() => void submitTrainingFeedback(false)}>Kein Abschluss</button><button type="button" onClick={() => onBeginCoordinateEdit({ objectKey: currentReviewPoint.objectKey, coordinateType: currentReviewPoint.coordinateType as 'start' | 'end', title: currentReviewPoint.title })}>Richtigen Abschluss setzen</button></div>{learningMessage ? <small>{learningMessage}</small> : null}</div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
       <div className="map-legend"><span><i className="legend-station"/>Bahnhof</span><span><i className="legend-platform"/>Bahnsteig</span><span><i className="legend-track-coordinate"/>Gleiskoordinate</span><span><i className="legend-platform-start"/>Bahnsteiganfang</span><span><i className="legend-platform-end"/>Bahnsteigende</span><span><i className="legend-coordinate-draft"/>Aktualisierter Punkt</span><span><i className="legend-entrance"/>Zugang</span><span><i className="legend-equipment"/>Ausstattung</span><span className="legend-source"><Layers3 size={14}/>OSM-Punkte</span></div>
     </div>
   </section>;
