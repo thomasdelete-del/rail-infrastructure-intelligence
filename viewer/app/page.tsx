@@ -121,8 +121,16 @@ export default function Home() {
       localStorage.setItem('friedberg-coordinate-drafts', JSON.stringify(next));
       return next;
     });
+    const track = edit.title.replace(/^Gleis\s+/i, '');
+    const analysis = aerialResults[track];
+    const features = edit.coordinateType === 'start' ? analysis?.start_features : analysis?.end_features;
+    void fetch(`${API}/stations/friedberg-hess/aerial-analysis/training-feedback`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ track, endpoint: edit.coordinateType, accepted: false, features: features ?? {},
+        corrected_coordinate: { latitude, longitude } }),
+    });
     setCoordinateEdit(null);
-  }, []);
+  }, [aerialResults]);
   const applyCoordinateSuggestion = useCallback((objectKey: string, start: Coordinate, end: Coordinate) => {
     setCoordinateDrafts((current) => {
       const next = { ...current, [`${objectKey}:start`]: start, [`${objectKey}:end`]: end };

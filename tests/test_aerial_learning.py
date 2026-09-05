@@ -24,3 +24,12 @@ def test_online_classifier_learns_positive_and_negative_examples(monkeypatch):
 
     assert count == 8
     assert positive is not None and negative is not None and positive > negative
+
+
+def test_latest_manual_correction_wins(monkeypatch):
+    monkeypatch.setattr(aerial_learning, "training_samples", lambda: [
+        {"track": "5", "endpoint": "start", "corrected_coordinate": {"latitude": 50.1, "longitude": 8.1}},
+        {"track": "5", "endpoint": "start", "corrected_coordinate": {"latitude": 50.2, "longitude": 8.2}},
+    ])
+    assert aerial_learning.latest_correction("5", "start") == {"latitude": 50.2, "longitude": 8.2}
+    assert aerial_learning.latest_correction("5", "end") is None

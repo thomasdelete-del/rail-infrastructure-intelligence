@@ -19,11 +19,13 @@ def feature_vector(features: dict[str, Any]) -> np.ndarray:
     ], dtype=float)
 
 
-def store_training_sample(track: str, endpoint: str, accepted: bool, features: dict[str, Any]) -> int:
+def store_training_sample(track: str, endpoint: str, accepted: bool, features: dict[str, Any],
+                          corrected_coordinate: dict[str, float] | None = None) -> int:
     return store_observations([{
         "object_key": f"FRI-OSM-platform-edge-{track}", "object_type": "platform_edge",
         "attribute": ATTRIBUTE,
-        "value": {"track": track, "endpoint": endpoint, "accepted": accepted, "features": features},
+        "value": {"track": track, "endpoint": endpoint, "accepted": accepted, "features": features,
+                  "corrected_coordinate": corrected_coordinate},
         "source_key": SOURCE_KEY, "source_publisher": "Manuelle Luftbildprüfung",
         "source_type": "human_review", "quality_class": "B", "method": "supervised_label",
         "is_derived": False,
@@ -34,6 +36,14 @@ def store_training_sample(track: str, endpoint: str, accepted: bool, features: d
 def training_samples() -> list[dict[str, Any]]:
     return [row["value"] for row in load_observations(SOURCE_KEY)
             if row.get("attribute") == ATTRIBUTE and isinstance(row.get("value"), dict)]
+
+
+def latest_correction(track: str, endpoint: str) -> dict[str, float] | None:
+    for sample in reversed(training_samples()):
+        coordinate = sample.get("corrected_coordinate")
+        if sample.get("track") == track and sample.get("endpoint") == endpoint and isinstance(coordinate, dict):
+            return {"latitude": float(coordinate["latitude"]), "longitude": float(coordinate["longitude"])}
+    return None
 
 
 def learned_probability(features: dict[str, Any]) -> tuple[float | None, int]:

@@ -10,7 +10,7 @@ import httpx
 import numpy as np
 
 from app.collectors.osm import OpenStreetMapCollector, parse_osm_friedberg
-from app.services.aerial_learning import learned_probability
+from app.services.aerial_learning import latest_correction, learned_probability
 
 
 WMS_URL = "https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows"
@@ -284,6 +284,27 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
                 probability, sample_count = None, 0
             result[f"{endpoint}_learned_probability"] = probability
             result["training_sample_count"] = sample_count
+    try:
+        corrections = {endpoint: latest_correction(track, endpoint) for endpoint in ("start", "end")}
+    except RuntimeError:
+        corrections = {"start": None, "end": None}
+    original_points = {
+        "start": np.array(_mercator(geometry[0]["lat"], geometry[0]["lon"]), dtype=float),
+        "end": np.array(_mercator(geometry[-1]["lat"], geometry[-1]["lon"]), dtype=float),
+    }
+    for endpoint, correction in corrections.items():
+        if not correction:
+            continue
+        corrected_xy = np.array(_mercator(correction["latitude"], correction["longitude"]), dtype=float)
+        result[f"candidate_{endpoint}"] = correction
+        result[f"{endpoint}_shift_m"] = round(float(np.linalg.norm(corrected_xy - original_points[endpoint])) * ground_scale, 1)
+        result[f"{endpoint}_human_confirmed"] = True
+    if result.get("candidate_start") and result.get("candidate_end"):
+        corrected_start = result["candidate_start"]
+        corrected_end = result["candidate_end"]
+        start_metric = np.array(_mercator(corrected_start["latitude"], corrected_start["longitude"]), dtype=float)
+        end_metric = np.array(_mercator(corrected_end["latitude"], corrected_end["longitude"]), dtype=float)
+        result["candidate_length_m"] = round(float(np.linalg.norm(end_metric - start_metric)) * ground_scale, 1)
     result.update({
         "station": "Friedberg (Hess)", "track": track,
         "osm": {"type": element["type"], "id": element["id"], "url": f"https://www.openstreetmap.org/{element['type']}/{element['id']}"},
