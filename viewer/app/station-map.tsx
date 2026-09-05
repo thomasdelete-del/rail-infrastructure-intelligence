@@ -46,7 +46,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
   points: StationMapPoint[];
   focusObjectKey: string | null;
   coordinateEdit: CoordinateEdit | null;
-  aerialReviewRequest: { objectKey: string; nonce: number; analysis?: AerialReviewAnalysis } | null;
+  aerialReviewRequest: { objectKey: string; nonce: number; coordinateType?: 'start' | 'end'; analysis?: AerialReviewAnalysis } | null;
   onSelect: (objectKey: string) => void;
   onBeginCoordinateEdit: (edit: CoordinateEdit) => void;
   onCoordinateChange: (edit: CoordinateEdit, latitude: number, longitude: number) => void;
@@ -203,7 +203,15 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
           allCoordinates.push(coordinate);
         }
       });
-      mapRef.current.fitBounds(L.latLngBounds(allCoordinates).pad(.35), { maxZoom: 23, animate: true });
+      const targetType = aerialReviewRequest.coordinateType;
+      if (targetType) {
+        const originalTarget = targetType === 'start' ? osmCoordinates[0] : osmCoordinates[1];
+        const candidateTarget = targetType === 'start' ? proposed[0] : proposed[1];
+        const targetBounds = L.latLngBounds(candidateTarget ? [originalTarget, candidateTarget] : [originalTarget]);
+        mapRef.current.fitBounds(targetBounds.pad(1.2), { maxZoom: 24, animate: true });
+      } else {
+        mapRef.current.fitBounds(L.latLngBounds(allCoordinates).pad(.35), { maxZoom: 23, animate: true });
+      }
     });
   }, [aerialReviewRequest, mapReady, points]);
 

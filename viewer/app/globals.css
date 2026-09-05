@@ -186,6 +186,10 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .platform-result-track { width: fit-content; border: 0; background: transparent; padding: 0; color: #0b5278; font-size: .92rem; font-weight: 800; cursor: pointer; }
 .platform-result-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: auto; padding-top: 6px; }
 .platform-result-actions button { border: 1px solid #b7c5cb; border-radius: 4px; background: #fff; padding: 4px 6px; color: #274653; font-size: .68rem; font-weight: 700; cursor: pointer; }
+.endpoint-result-jump { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #d2dde1; border-radius: 5px; background: #f8fbfc; padding: 6px 7px; color: #435b66; cursor: pointer; text-align: left; }
+.endpoint-result-jump:hover, .endpoint-result-jump:focus-visible { border-color: #0b5278; background: #edf7fb; outline: none; }
+.endpoint-result-jump span { font-size: .72rem; }
+.endpoint-result-jump strong { color: #183d4d; font-size: .72rem; }
 .map-review-label { border: 0; border-radius: 4px; box-shadow: 0 1px 4px rgb(7 27 43 / .3); padding: 4px 7px; font-size: .72rem; font-weight: 800; }
 .map-review-osm { background: #fff4dc; color: #7d4a00; }
 .map-review-proposal { background: #dcf8ff; color: #00677c; }

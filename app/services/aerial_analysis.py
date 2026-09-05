@@ -96,7 +96,7 @@ def analyse_platform_crop(
             peak_index = global_index
             prominence = (float(smoothed[peak_index]) - baseline) / max(spread, 1.0)
         shift = float(offsets[peak_index])
-        if prominence < 1.8 or abs(shift) > 8 or peak_index < 3 or peak_index > len(offsets) - 4:
+        if prominence < 2.7 or abs(shift) > 8 or peak_index < 3 or peak_index > len(offsets) - 4:
             return None
         return origin + axis * shift, shift, prominence
 
@@ -130,6 +130,8 @@ def analyse_platform_crop(
         "maximum_endpoint_shift_m": round(endpoint_shift, 1),
         "start_shift_m": round(start_shift, 1),
         "end_shift_m": round(end_shift, 1),
+        "start_confidence": round(min(0.9, start_prominence / 4.5), 2),
+        "end_confidence": round(min(0.9, end_prominence / 4.5), 2),
         "method": "Lokale Endpunktsuche ±35 m entlang der OSM-Bahnsteigachse",
     }
 
