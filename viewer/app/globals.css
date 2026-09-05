@@ -57,9 +57,11 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .map-legend { position: absolute; z-index: 500; bottom: 28px; left: 14px; display: flex; flex-wrap: wrap; gap: 9px 13px; max-width: calc(100% - 28px); border-radius: 8px; background: rgb(7 27 43 / 91%); padding: 9px 12px; color: white; box-shadow: 0 2px 12px rgb(7 27 43 / 25%); backdrop-filter: blur(6px); }
 .map-legend span { display: inline-flex; align-items: center; gap: 5px; font-size: .6875rem; font-weight: 650; white-space: nowrap; }
 .map-legend i { height: 9px; width: 9px; border: 2px solid white; border-radius: 999px; }
-.legend-station { background: #d54532; } .legend-platform { background: #0b5278; } .legend-track-coordinate { background: #1873a5; } .legend-platform-start { background: #20a464; } .legend-platform-end { background: #d54532; } .legend-coordinate-draft { border: 2px solid #7c2d92 !important; background: #f5a623; } .legend-entrance { background: #20845a; } .legend-equipment { background: #7564a5; }
+.legend-station { background: #d54532; } .legend-platform { background: #0b5278; } .legend-track-coordinate { background: #1873a5; } .legend-platform-start { background: #20a464; } .legend-platform-end { background: #d54532; } .legend-coordinate-draft { background: repeating-linear-gradient(135deg, #20a464 0 3px, #fff 3px 4px, #20a464 4px 7px); } .legend-entrance { background: #20845a; } .legend-equipment { background: #7564a5; }
 .coordinate-draft-marker { border: 0; background: transparent; }
-.coordinate-draft-marker span { display: block; width: 20px; height: 20px; border: 3px solid #7c2d92; border-radius: 50%; background: repeating-linear-gradient(135deg, #f5a623 0 3px, #fff4cf 3px 6px); box-shadow: 0 1px 5px rgb(7 27 43 / 45%); }
+.coordinate-draft-marker span { display: block; box-sizing: border-box; width: 14px; height: 14px; border: 2px solid #fff; border-radius: 50%; background: repeating-linear-gradient(135deg, var(--coordinate-color) 0 3px, #fff 3px 4px, var(--coordinate-color) 4px 7px); box-shadow: 0 1px 4px rgb(7 27 43 / 45%); }
+.coordinate-draft-start { --coordinate-color: #20a464; }
+.coordinate-draft-end { --coordinate-color: #d54532; }
 .legend-source { padding-left: 4px; color: #cbd7dc; }
 .leaflet-control-attribution { font-size: 10px !important; }
 .leaflet-popup-content { color: #18313f; line-height: 1.55; }

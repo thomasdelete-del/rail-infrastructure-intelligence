@@ -117,7 +117,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
         const endpoint = point.coordinateType !== 'position';
         const focused = point.objectKey === focusObjectKey;
         const marker = point.isDraft ? L.marker([point.latitude, point.longitude], {
-          icon: L.divIcon({ className: 'coordinate-draft-marker', html: '<span></span>', iconSize: [20, 20], iconAnchor: [10, 10] }),
+          icon: L.divIcon({ className: `coordinate-draft-marker coordinate-draft-${point.coordinateType}`, html: '<span></span>', iconSize: [14, 14], iconAnchor: [7, 7] }),
         }) : L.circleMarker([point.latitude, point.longitude], {
           radius: point.isDraft ? 8 : focused ? 10 : endpoint ? 5 : point.objectType === 'stop_place' ? 9 : 6,
           color: point.isDraft ? '#7c2d92' : focused ? '#f5a623' : '#ffffff',
