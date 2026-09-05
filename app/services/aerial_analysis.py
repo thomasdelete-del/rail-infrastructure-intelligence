@@ -83,7 +83,11 @@ def analyse_platform_crop(
         direction_px = np.array(xy_to_pixel(origin + search_axis)) - origin_px
         direction_px /= np.linalg.norm(direction_px)
         directional_gradient = np.abs(gradient_x * direction_px[0] + gradient_y * direction_px[1])
-        offsets = np.linspace(-35.0, 35.0, 141)
+        interior_extent = min(180.0, max(45.0, osm_length * 0.48))
+        if interior_sign > 0:
+            offsets = np.arange(-30.0, interior_extent + 0.25, 0.5)
+        else:
+            offsets = np.arange(-interior_extent, 30.25, 0.5)
         lateral_offsets = np.linspace(-6.0, 6.0, 25)
         scores: list[float] = []
         for offset in offsets:
@@ -99,54 +103,52 @@ def analyse_platform_crop(
                               float(np.mean(values[:, halfway:]))))
         smoothed = cv2.GaussianBlur(np.array(scores, dtype=np.float32).reshape(1, -1), (9, 1), 0).ravel()
         baseline, spread = float(np.median(smoothed)), float(np.std(smoothed))
-        zero_indices = np.flatnonzero(np.abs(offsets) <= 3.0)
-        near_index = int(zero_indices[np.argmax(smoothed[zero_indices])])
-        global_index = int(np.argmax(smoothed))
-        near_prominence = (float(smoothed[near_index]) - baseline) / max(spread, 1.0)
-        # A visible terminating edge at the existing OSM point is stronger evidence
-        # than a more contrast-rich object elsewhere in the search window.
-        if near_prominence >= 1.0:
-            peak_index, prominence = near_index, near_prominence
-        else:
-            peak_index = global_index
+        local_maxima = np.flatnonzero(
+            (smoothed[1:-1] >= smoothed[:-2]) & (smoothed[1:-1] >= smoothed[2:])
+        ) + 1
+        ranked_candidates = sorted(local_maxima, key=lambda index: float(smoothed[index]), reverse=True)[:30]
+        detections: list[tuple[float, np.ndarray, float, float, float]] = []
+        for peak_index in ranked_candidates:
+            shift = float(offsets[peak_index])
             prominence = (float(smoothed[peak_index]) - baseline) / max(spread, 1.0)
-        shift = float(offsets[peak_index])
-        required_prominence = 1.4 if abs(shift) <= 3 else 2.7
-        if prominence < required_prominence or abs(shift) > 8 or peak_index < 3 or peak_index > len(offsets) - 4:
+            required_prominence = 1.4 if abs(shift) <= 3 else 2.0
+            if prominence < required_prominence:
+                continue
+            candidate = origin + search_axis * (shift / ground_scale)
+
+            # A transverse image edge alone may be a sleeper, cable duct or shadow.
+            # A real termination also ends the longitudinal platform boundaries.
+            normal_px = np.array(xy_to_pixel(candidate + local_normal)) - np.array(xy_to_pixel(candidate))
+            normal_px /= np.linalg.norm(normal_px)
+            longitudinal_gradient = np.abs(gradient_x * normal_px[0] + gradient_y * normal_px[1])
+
+            def boundary_strength(direction: int, lateral: float) -> float:
+                longitudinal = np.linspace(4.0, 18.0, 15) * direction
+                lateral_band = np.linspace(lateral - 1.5, lateral + 1.5, 7)
+                samples = np.array([
+                    xy_to_pixel(candidate + search_axis * (distance / ground_scale) + local_normal * (side / ground_scale))
+                    for distance in longitudinal for side in lateral_band
+                ])
+                values = cv2.remap(longitudinal_gradient, samples[:, 0].astype(np.float32).reshape(1, -1),
+                                   samples[:, 1].astype(np.float32).reshape(1, -1), cv2.INTER_LINEAR,
+                                   borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+                return float(np.mean(values))
+
+            ratios = []
+            for lateral in (-4.0, 0.0, 4.0):
+                inside = boundary_strength(interior_sign, lateral)
+                outside = boundary_strength(-interior_sign, lateral)
+                ratios.append((inside + 4.0) / (outside + 4.0))
+            termination_ratio = sorted(ratios)[-2]
+            if termination_ratio < 1.18:
+                continue
+            # Distance is not a veto. Strong, corroborated evidence may correct
+            # an OSM endpoint far inside the mapped platform edge.
+            evidence_score = prominence + min(termination_ratio - 1.0, 2.0) * 2.0
+            detections.append((evidence_score, candidate, shift, prominence, termination_ratio))
+        if not detections:
             return None
-        candidate = origin + search_axis * (shift / ground_scale)
-
-        # A transverse image edge alone may be a sleeper, cable duct or shadow.
-        # A real platform termination also ends the longitudinal platform edge:
-        # it must be measurably stronger towards the platform interior than past
-        # the proposed endpoint. Evaluate both sides of the mapped edge and keep
-        # the side with the clearest physically consistent termination.
-        normal_px = np.array(xy_to_pixel(candidate + local_normal)) - np.array(xy_to_pixel(candidate))
-        normal_px /= np.linalg.norm(normal_px)
-        longitudinal_gradient = np.abs(gradient_x * normal_px[0] + gradient_y * normal_px[1])
-
-        def boundary_strength(direction: int, lateral: float) -> float:
-            longitudinal = np.linspace(4.0, 18.0, 15) * direction
-            lateral_band = np.linspace(lateral - 1.5, lateral + 1.5, 7)
-            samples = np.array([
-                xy_to_pixel(candidate + search_axis * (distance / ground_scale) + local_normal * (side / ground_scale))
-                for distance in longitudinal for side in lateral_band
-            ])
-            values = cv2.remap(longitudinal_gradient, samples[:, 0].astype(np.float32).reshape(1, -1),
-                               samples[:, 1].astype(np.float32).reshape(1, -1), cv2.INTER_LINEAR,
-                               borderMode=cv2.BORDER_CONSTANT, borderValue=0)
-            return float(np.mean(values))
-
-        termination_ratios = []
-        for lateral in (-4.0, 0.0, 4.0):
-            inside = boundary_strength(interior_sign, lateral)
-            outside = boundary_strength(-interior_sign, lateral)
-            termination_ratios.append((inside + 4.0) / (outside + 4.0))
-        # Require corroboration at a second lateral section. One isolated ratio
-        # is commonly produced by a rail, sleeper or shadow inside a platform.
-        termination_ratio = sorted(termination_ratios)[-2]
-        if termination_ratio < 1.18:
-            return None
+        _, candidate, shift, prominence, termination_ratio = max(detections, key=lambda item: item[0])
         return candidate, shift, prominence, termination_ratio
 
     start_detection = detect_endpoint(start_xy, start_axis, 1)

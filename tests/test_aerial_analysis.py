@@ -22,9 +22,10 @@ def test_detects_parallel_aerial_edges_and_proposes_longer_extent():
         [_geometry_point(40, 40), _geometry_point(160, 40)],
     )
 
-    assert result["status"] == "insufficient_evidence"
-    assert result["confidence"] == 0
-    assert "OSM-Endpunkte" in result["reason"]
+    assert result["status"] == "check"
+    assert result["candidate_length_m"] > result["osm_chord_length_m"]
+    assert abs(result["start_shift_m"]) > 8
+    assert abs(result["end_shift_m"]) > 8
 
 
 def test_returns_insufficient_evidence_for_blank_crop():
