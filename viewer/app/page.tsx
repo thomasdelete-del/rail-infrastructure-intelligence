@@ -262,17 +262,6 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, aerialResul
           const response = await fetch(`${API}/stations/friedberg-hess/aerial-analysis/osm?track=${encodeURIComponent(track)}`, { cache: 'no-store' });
           if (!response.ok) throw new Error('Luftbildanalyse nicht erreichbar');
           const result = await response.json() as AerialAnalysis;
-          const edge = reference.platform_edges.find((item) => item.track === track);
-          const dbLength = edge ? Number(value(edge, 'net_construction_length')?.value) : NaN;
-          const candidateConflict = Number.isFinite(dbLength) && dbLength > 0 && result.candidate_length_m !== undefined
-            && Math.abs(result.candidate_length_m - dbLength) / dbLength > 0.15;
-          if (edge && (comparison(edge)?.level === 'high' || candidateConflict)) {
-            result.status = 'check';
-            result.length_conflict = true;
-            result.reason = candidateConflict
-              ? 'Bildvorschlag verworfen: Die daraus entstehende Länge widerspricht der DB-Nettobaulänge wesentlich'
-              : 'Lokaler Bildtreffer verworfen: OSM-Länge und DB-Nettobaulänge widersprechen sich wesentlich';
-          }
           onAerialResult(track, result);
         } catch {
           onAerialResult(track, { status: 'insufficient_evidence', confidence: 0, reason: 'Keine eindeutige automatische Auswertung verfügbar', advisory_only: true });
