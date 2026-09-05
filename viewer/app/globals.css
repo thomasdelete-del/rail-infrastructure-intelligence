@@ -111,7 +111,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .source-state-active { background: #e8f6ef; color: #176944; }
 .source-state-pending { background: #fff1df; color: #87420f; }
 .platform-data-scroll { overflow-x: auto; }
-.platform-data-table { min-width: 1340px; width: 100%; border-collapse: collapse; font-size: .875rem; }
+.platform-data-table { min-width: 1510px; width: 100%; border-collapse: collapse; font-size: .875rem; }
 .platform-data-table th { background: #f2f6f7; color: #566872; font-size: .75rem; letter-spacing: .035em; text-align: left; text-transform: uppercase; }
 .platform-data-table th, .platform-data-table td { border-right: 1px solid #dde5e8; border-bottom: 1px solid #dde5e8; padding: 13px 15px; vertical-align: middle; }
 .platform-data-table th:last-child, .platform-data-table td:last-child { border-right: 0; }
@@ -144,6 +144,11 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .updated-coordinate, .updated-length { display: flex; flex-direction: column; gap: 2px; border-left: 3px solid #f5a623; background: #fff8e8; padding: 7px 9px; color: #5d3a05; }
 .updated-coordinate > span:last-child, .updated-length span { font-size: .7rem; color: #765927; }
 .updated-badge { width: fit-content; border-radius: 999px; background: #f5a623; padding: 2px 7px; color: #3d2705 !important; font-size: .65rem !important; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.osm-confirm { display: inline-flex; min-height: 34px; align-items: center; gap: 6px; border: 1px solid #aebdc4; border-radius: 999px; background: #fff; padding: 6px 10px; color: #4f626c; font-size: .75rem; font-weight: 750; cursor: pointer; }
+.osm-confirm:hover { border-color: #176944; background: #eff9f4; }
+.osm-confirmed { border-color: #71b798; background: #e8f6ef; color: #176944; }
+.db-length-review { display: flex; flex-direction: column; gap: 7px; border-left: 4px solid #c23b30; border-radius: 4px; background: #fff0ee; padding: 8px 10px; }
+.db-length-review > span { max-width: 190px; color: #9b2c23; font-size: .7rem; font-weight: 750; line-height: 1.35; }
 
 @media (max-width: 520px) { .status-ok { max-width: 34px; overflow: hidden; padding: 8px; } }
 @media (max-width: 700px) { .station-map-heading { align-items: flex-start; padding: 17px 18px; } .map-heading-actions { align-self: flex-start; } .map-summary { display: none; } .station-map-wrap, .station-map { height: 430px; min-height: 430px; } .map-controls { left: 12px; right: 12px; justify-content: space-between; } .map-toggle span { display: none; } .opacity-control { grid-template-columns: auto 64px 32px; } .map-legend { bottom: 26px; left: 12px; } }
