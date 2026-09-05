@@ -197,8 +197,8 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
           fillColor: point.isDraft ? '#f5a623' : point.objectType === 'platform_edge' ? platformCoordinateColors[point.coordinateType] : markerColors[point.objectType] ?? '#445b66',
           fillOpacity: 0.96,
         });
-        const endpointReview = aerialReviewRequest?.objectKey === point.objectKey && Boolean(aerialReviewRequest.coordinateType);
-        marker.bindTooltip(escapeHtml(point.title), { direction: 'top', offset: [0, -7], permanent: focused && !endpointReview, className: focused && !endpointReview ? 'focused-platform-label' : '' });
+        const showFocusedLabel = focused && !aerialReviewRequest;
+        marker.bindTooltip(escapeHtml(point.title), { direction: 'top', offset: [0, -7], permanent: showFocusedLabel, className: showFocusedLabel ? 'focused-platform-label' : '' });
         const coordinateLabel = point.objectType === 'platform_edge' && point.coordinateType === 'position' ? 'Gleiskoordinate' : coordinateLabels[point.coordinateType];
         marker.bindPopup(`<strong>${escapeHtml(point.title)}</strong><br>${escapeHtml(typeLabels[point.objectType] ?? point.objectType)} · ${coordinateLabel}${point.isDraft ? ' · Aktualisiert' : ''}<br><small>${point.latitude.toFixed(6)}, ${point.longitude.toFixed(6)}<br>${point.isDraft ? 'Manueller Prüfvorschlag' : 'Quelle: OpenStreetMap'}</small>`);
         marker.on('click', () => onSelect(point.objectKey));
