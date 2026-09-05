@@ -77,7 +77,7 @@ def analyse_platform_crop(
     blurred = cv2.GaussianBlur(gray, (7, 7), 0)
     gradient_x = cv2.Sobel(blurred, cv2.CV_32F, 1, 0, ksize=3)
     gradient_y = cv2.Sobel(blurred, cv2.CV_32F, 0, 1, ksize=3)
-    def detect_endpoint(origin: np.ndarray, search_axis: np.ndarray) -> tuple[np.ndarray, float, float] | None:
+    def detect_endpoint(origin: np.ndarray, search_axis: np.ndarray, interior_sign: int) -> tuple[np.ndarray, float, float, float] | None:
         local_normal = np.array([-search_axis[1], search_axis[0]])
         origin_px = np.array(xy_to_pixel(origin))
         direction_px = np.array(xy_to_pixel(origin + search_axis)) - origin_px
@@ -114,14 +114,48 @@ def analyse_platform_crop(
         required_prominence = 1.4 if abs(shift) <= 3 else 2.7
         if prominence < required_prominence or abs(shift) > 8 or peak_index < 3 or peak_index > len(offsets) - 4:
             return None
-        return origin + search_axis * (shift / ground_scale), shift, prominence
+        candidate = origin + search_axis * (shift / ground_scale)
 
-    start_detection = detect_endpoint(start_xy, start_axis)
-    end_detection = detect_endpoint(end_xy, end_axis)
-    def endpoint_confidence(detection: tuple[np.ndarray, float, float]) -> float:
-        _, shift, prominence = detection
+        # A transverse image edge alone may be a sleeper, cable duct or shadow.
+        # A real platform termination also ends the longitudinal platform edge:
+        # it must be measurably stronger towards the platform interior than past
+        # the proposed endpoint. Evaluate both sides of the mapped edge and keep
+        # the side with the clearest physically consistent termination.
+        normal_px = np.array(xy_to_pixel(candidate + local_normal)) - np.array(xy_to_pixel(candidate))
+        normal_px /= np.linalg.norm(normal_px)
+        longitudinal_gradient = np.abs(gradient_x * normal_px[0] + gradient_y * normal_px[1])
+
+        def boundary_strength(direction: int, lateral: float) -> float:
+            longitudinal = np.linspace(4.0, 18.0, 15) * direction
+            lateral_band = np.linspace(lateral - 1.5, lateral + 1.5, 7)
+            samples = np.array([
+                xy_to_pixel(candidate + search_axis * (distance / ground_scale) + local_normal * (side / ground_scale))
+                for distance in longitudinal for side in lateral_band
+            ])
+            values = cv2.remap(longitudinal_gradient, samples[:, 0].astype(np.float32).reshape(1, -1),
+                               samples[:, 1].astype(np.float32).reshape(1, -1), cv2.INTER_LINEAR,
+                               borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+            return float(np.mean(values))
+
+        termination_ratios = []
+        for lateral in (-4.0, 0.0, 4.0):
+            inside = boundary_strength(interior_sign, lateral)
+            outside = boundary_strength(-interior_sign, lateral)
+            termination_ratios.append((inside + 4.0) / (outside + 4.0))
+        # Require corroboration at a second lateral section. One isolated ratio
+        # is commonly produced by a rail, sleeper or shadow inside a platform.
+        termination_ratio = sorted(termination_ratios)[-2]
+        if termination_ratio < 1.18:
+            return None
+        return candidate, shift, prominence, termination_ratio
+
+    start_detection = detect_endpoint(start_xy, start_axis, 1)
+    end_detection = detect_endpoint(end_xy, end_axis, -1)
+    def endpoint_confidence(detection: tuple[np.ndarray, float, float, float]) -> float:
+        _, shift, prominence, termination_ratio = detection
         osm_prior = 0.45 if abs(shift) <= 3 else 0.0
-        return round(min(0.9, osm_prior + prominence / 6), 2)
+        termination_evidence = min(0.25, max(0.0, termination_ratio - 1.0) / 2)
+        return round(min(0.9, osm_prior + prominence / 8 + termination_evidence), 2)
 
     if not start_detection or not end_detection:
         result: dict[str, Any] = {"status": "insufficient_evidence", "confidence": 0.0,
@@ -129,13 +163,15 @@ def analyse_platform_crop(
                                   "method": "OSM-zentrierte lokale Endpunktprüfung; Anfang und Ende getrennt"}
         if start_detection:
             result.update(candidate_start=_latlon(*start_detection[0]), start_shift_m=round(start_detection[1], 1),
-                          start_confidence=endpoint_confidence(start_detection))
+                          start_confidence=endpoint_confidence(start_detection),
+                          start_termination_ratio=round(start_detection[3], 2))
         if end_detection:
             result.update(candidate_end=_latlon(*end_detection[0]), end_shift_m=round(end_detection[1], 1),
-                          end_confidence=endpoint_confidence(end_detection))
+                          end_confidence=endpoint_confidence(end_detection),
+                          end_termination_ratio=round(end_detection[3], 2))
         return result
-    candidate_start_xy, start_shift, start_prominence = start_detection
-    candidate_end_xy, end_shift, end_prominence = end_detection
+    candidate_start_xy, start_shift, start_prominence, start_termination = start_detection
+    candidate_end_xy, end_shift, end_prominence, end_termination = end_detection
     candidate_length = float(np.linalg.norm(candidate_end_xy - candidate_start_xy)) * ground_scale
     endpoint_shift = max(abs(start_shift), abs(end_shift))
     length_delta = candidate_length - osm_length
@@ -156,7 +192,9 @@ def analyse_platform_crop(
         "end_shift_m": round(end_shift, 1),
         "start_confidence": start_confidence,
         "end_confidence": end_confidence,
-        "method": "Lokale Endpunktsuche ±35 m entlang der OSM-Bahnsteigachse",
+        "start_termination_ratio": round(start_termination, 2),
+        "end_termination_ratio": round(end_termination, 2),
+        "method": "Mehrsignal-Abschlussprüfung: Querabschluss und Abbruch der Bahnsteig-Längskante",
     }
 
 

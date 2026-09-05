@@ -41,6 +41,27 @@ def test_returns_insufficient_evidence_for_blank_crop():
     assert result["confidence"] == 0
 
 
+def test_confirms_endpoints_only_when_longitudinal_edges_terminate_there():
+    bbox = (0.0, 0.0, 200.0, 80.0)
+    image = np.full((400, 1000, 3), 105, dtype=np.uint8)
+    cv2.rectangle(image, (200, 180), (800, 220), (205, 205, 205), -1)
+    cv2.line(image, (200, 180), (800, 180), (250, 250, 250), 5)
+    cv2.line(image, (200, 220), (800, 220), (245, 245, 245), 5)
+    cv2.line(image, (200, 180), (200, 220), (245, 245, 245), 5)
+    cv2.line(image, (800, 180), (800, 220), (245, 245, 245), 5)
+    ok, encoded = cv2.imencode(".png", image)
+    assert ok
+
+    result = analyse_platform_crop(
+        encoded.tobytes(), bbox,
+        [_geometry_point(40, 40), _geometry_point(160, 40)],
+    )
+
+    assert result["status"] == "plausible"
+    assert result["start_termination_ratio"] >= 1.18
+    assert result["end_termination_ratio"] >= 1.18
+
+
 def test_does_not_infer_full_length_without_visible_local_endpoints():
     bbox = (0.0, 0.0, 600.0, 100.0)
     image = np.full((400, 1200, 3), 110, dtype=np.uint8)
