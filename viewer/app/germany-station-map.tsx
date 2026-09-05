@@ -48,6 +48,7 @@ export function SelectedStationMap({
     stationNumber?: string;
     osm?: string;
   } | null>(null);
+  const [dbSources, setDbSources] = useState<{ stada?: string; fasta?: string; facilities?: number }>({});
   const [loading, setLoading] = useState(true);
   const displayName = /bahnhof$/i.test(station.name.trim())
     ? station.name
@@ -55,9 +56,9 @@ export function SelectedStationMap({
   useEffect(() => {
     const controller = new AbortController();
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
-    void fetch(`${API}/stations/resolve-identity?${parameters}`, { cache: 'no-store', signal: controller.signal })
+    void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
-      .then((raw: unknown) => { const value = raw as { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); })
+      .then((raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); })
       .catch((error: Error) => { if (error.name !== 'AbortError') setIdentity(null); });
     return () => controller.abort();
   }, [station]);
@@ -178,6 +179,8 @@ export function SelectedStationMap({
             </span>
             {identity ? <><span>OSM-ID: {identity.osm}</span><span>EVA/IBNR: {identity.eva ?? 'nicht gepflegt'}</span><span>RIL100: {identity.ril ?? 'nicht gepflegt'}</span><span>DB-Stationsnummer: {identity.stationNumber ?? 'nicht gepflegt'}</span></> : <span>Stationskennung konnte nicht eindeutig ermittelt werden</span>}
             <span>{identity?.eva || identity?.ril || identity?.stationNumber ? 'Identitäts-Gate: Kennung gefunden' : 'DB-Quellen: eindeutige Kennung fehlt'}</span>
+            <span>DB StaDa: {dbSources.stada ?? 'wird geprüft'}</span>
+            <span>DB FaSta: {dbSources.fasta ?? 'wird geprüft'}{dbSources.facilities !== undefined ? ` · ${dbSources.facilities} Anlagen` : ''}</span>
           </div>
         </div>
         <button type="button" onClick={onBack}>
