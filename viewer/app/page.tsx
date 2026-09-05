@@ -119,7 +119,6 @@ export default function Home() {
       return next;
     });
     setCoordinateEdit(null);
-    setFocusObjectKey(edit.objectKey);
   }, []);
   const focusPlatform = useCallback((objectKey: string) => {
     setSelectedKey(objectKey);

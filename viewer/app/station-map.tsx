@@ -55,6 +55,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
   const markerLayerRef = useRef<LayerGroup | null>(null);
   const satelliteLayerRef = useRef<TileLayer | null>(null);
   const aerialLayerRef = useRef<TileLayer | null>(null);
+  const lastFocusedObjectRef = useRef<string | null>(null);
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [imageryOpacity, setImageryOpacity] = useState(65);
   const [mapReady, setMapReady] = useState(false);
@@ -149,7 +150,9 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
   }, [focusObjectKey, mapReady, onBeginCoordinateEdit, onSelect, points]);
 
   useEffect(() => {
-    if (!mapReady || !mapRef.current || !focusObjectKey) return;
+    if (!focusObjectKey) { lastFocusedObjectRef.current = null; return; }
+    if (!mapReady || !mapRef.current || lastFocusedObjectRef.current === focusObjectKey) return;
+    lastFocusedObjectRef.current = focusObjectKey;
     const objectPoints = points.filter((point) => point.objectKey === focusObjectKey);
     if (!objectPoints.length) return;
     void import('leaflet').then((L) => {
