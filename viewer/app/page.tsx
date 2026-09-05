@@ -263,10 +263,15 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, aerialResul
           if (!response.ok) throw new Error('Luftbildanalyse nicht erreichbar');
           const result = await response.json() as AerialAnalysis;
           const edge = reference.platform_edges.find((item) => item.track === track);
-          if (edge && comparison(edge)?.level === 'high') {
+          const dbLength = edge ? Number(value(edge, 'net_construction_length')?.value) : NaN;
+          const candidateConflict = Number.isFinite(dbLength) && dbLength > 0 && result.candidate_length_m !== undefined
+            && Math.abs(result.candidate_length_m - dbLength) / dbLength > 0.15;
+          if (edge && (comparison(edge)?.level === 'high' || candidateConflict)) {
             result.status = 'insufficient_evidence';
             result.length_conflict = true;
-            result.reason = 'Lokaler Bildtreffer verworfen: OSM-Länge und DB-Nettobaulänge widersprechen sich wesentlich';
+            result.reason = candidateConflict
+              ? 'Bildvorschlag verworfen: Die daraus entstehende Länge widerspricht der DB-Nettobaulänge wesentlich'
+              : 'Lokaler Bildtreffer verworfen: OSM-Länge und DB-Nettobaulänge widersprechen sich wesentlich';
             result.candidate_start = undefined;
             result.candidate_end = undefined;
             result.start_shift_m = undefined;
