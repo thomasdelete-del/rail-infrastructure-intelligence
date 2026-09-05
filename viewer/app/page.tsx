@@ -104,9 +104,8 @@ export default function Home() {
         const pointLongitude = Number(coordinate?.longitude);
         const coordinateType = attribute === 'start_coordinates' ? 'start' : 'end';
         const draft = coordinateDrafts[`${item.object_key}:${coordinateType}`];
-        const latitudeValue = draft?.latitude ?? pointLatitude;
-        const longitudeValue = draft?.longitude ?? pointLongitude;
-        if (Number.isFinite(latitudeValue) && Number.isFinite(longitudeValue)) points.push({ id: `${item.object_key}:${attribute}`, objectKey: item.object_key, latitude: latitudeValue, longitude: longitudeValue, title, objectType: item.object_type, coordinateType });
+        if (Number.isFinite(pointLatitude) && Number.isFinite(pointLongitude)) points.push({ id: `${item.object_key}:${attribute}`, objectKey: item.object_key, latitude: pointLatitude, longitude: pointLongitude, title, objectType: item.object_type, coordinateType });
+        if (draft) points.push({ id: `${item.object_key}:${attribute}:draft`, objectKey: item.object_key, latitude: draft.latitude, longitude: draft.longitude, title, objectType: item.object_type, coordinateType, isDraft: true });
       });
     });
     return points;
@@ -189,11 +188,34 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
     return `${String(observation.value)}${observation.unit ? ` ${observation.unit}` : ''}`;
   };
   const cell = (observation: ReferenceObservation | Evidence | undefined, source: string) => observation ? <div className="data-value"><strong>{format(observation)}</strong><span>{source}</span></div> : <span className="data-missing">Nicht geliefert</span>;
+  const coordinateValue = (edge: ReferenceEdge, coordinateType: 'start' | 'end') => {
+    const observation = osmValue(edge, coordinateType === 'start' ? 'start_coordinates' : 'end_coordinates');
+    const value = observation?.value as { latitude?: unknown; longitude?: unknown } | undefined;
+    const latitude = Number(value?.latitude);
+    const longitude = Number(value?.longitude);
+    return Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : null;
+  };
+  const distanceMetres = (start: Coordinate, end: Coordinate) => {
+    const radians = (degrees: number) => degrees * Math.PI / 180;
+    const latitudeDelta = radians(end.latitude - start.latitude);
+    const longitudeDelta = radians(end.longitude - start.longitude);
+    const a = Math.sin(latitudeDelta / 2) ** 2 + Math.cos(radians(start.latitude)) * Math.cos(radians(end.latitude)) * Math.sin(longitudeDelta / 2) ** 2;
+    return 6371000 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+  const proposedLength = (edge: ReferenceEdge) => {
+    const startDraft = coordinateDrafts[`${edge.object_id}:start`];
+    const endDraft = coordinateDrafts[`${edge.object_id}:end`];
+    if (!startDraft && !endDraft) return null;
+    const start = startDraft ?? coordinateValue(edge, 'start');
+    const end = endDraft ?? coordinateValue(edge, 'end');
+    return start && end ? distanceMetres(start, end) : null;
+  };
   const osmGeometryCell = (edge: ReferenceEdge) => {
     const observation = osmValue(edge, 'construction_length');
     const osmType = String(observation?.provenance?.osm_type ?? 'way');
     const osmId = observation?.provenance?.osm_id;
-    return <div className="data-value"><strong>{format(observation) ?? 'Nicht geliefert'}</strong><span>OSM · Geometrie</span>{osmId ? <a className="source-data-link" href={`https://www.openstreetmap.org/${osmType}/${String(osmId)}`} target="_blank" rel="noreferrer">Original OSM {osmType} {String(osmId)} <ExternalLink size={11}/></a> : null}</div>;
+    const updatedLength = proposedLength(edge);
+    return <div className="data-value"><strong>{format(observation) ?? 'Nicht geliefert'}</strong><span>OSM · Ist-Geometrie</span>{updatedLength !== null ? <div className="updated-length"><strong>{updatedLength.toFixed(1)} m</strong><span>Neue OSM-Länge · aus Endpunkten berechnet</span></div> : null}{osmId ? <a className="source-data-link" href={`https://www.openstreetmap.org/${osmType}/${String(osmId)}`} target="_blank" rel="noreferrer">Original OSM {osmType} {String(osmId)} <ExternalLink size={11}/></a> : null}</div>;
   };
   const usableLengthCell = (edge: ReferenceEdge) => {
     const rinf = rinfValue(edge);
@@ -208,8 +230,7 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
     const attribute = coordinateType === 'start' ? 'start_coordinates' : 'end_coordinates';
     const draft = coordinateDrafts[`${edge.object_id}:${coordinateType}`];
     const observation = osmValue(edge, attribute);
-    const shown = draft ? `${draft.latitude.toFixed(6)}, ${draft.longitude.toFixed(6)}` : format(observation);
-    return <div className="coordinate-cell"><div className="data-value"><strong>{shown ?? 'Nicht geliefert'}</strong><span>{draft ? 'Manueller Prüfvorschlag' : 'OpenStreetMap'}</span></div><button type="button" onClick={() => onEdit({ objectKey: edge.object_id, coordinateType, title: `Gleis ${edge.track}` })}><Crosshair size={13}/>{coordinateType === 'start' ? 'Anfang' : 'Ende'} anpassen</button></div>;
+    return <div className="coordinate-cell"><div className="data-value"><strong>{format(observation) ?? 'Nicht geliefert'}</strong><span>OpenStreetMap · Ist</span></div>{draft ? <div className="updated-coordinate"><span className="updated-badge">Aktualisiert</span><strong>{draft.latitude.toFixed(6)}, {draft.longitude.toFixed(6)}</strong><span>Manueller Prüfvorschlag</span></div> : null}<button type="button" onClick={() => onEdit({ objectKey: edge.object_id, coordinateType, title: `Gleis ${edge.track}` })}><Crosshair size={13}/>{coordinateType === 'start' ? 'Anfang' : 'Ende'} anpassen</button></div>;
   };
   return <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
     <div className="flex flex-col justify-between gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten und Plausibilitätscheck</h2><p className="mt-1 text-sm text-muted-foreground">DB-Maße gegen OSM-Geometrie; Endpunkte können oben wahlweise auf Satellitenbild oder amtlichem Hessen-DOP geprüft werden.</p></div><div className="comparison-summary"><span className="comparison-low">{comparisons.filter((item) => item?.level === 'low').length} geringe</span><span className="comparison-check">{comparisons.filter((item) => item?.level === 'check').length} prüfen</span><span className="comparison-high">{comparisons.filter((item) => item?.level === 'high').length} auffällig</span></div></div>
