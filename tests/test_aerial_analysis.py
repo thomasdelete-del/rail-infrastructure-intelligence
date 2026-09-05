@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 
-from app.services.aerial_analysis import _latlon, analyse_platform_crop
+from app.services.aerial_analysis import _latlon, _recompute_candidate_metrics, analyse_platform_crop
 
 
 def _geometry_point(x: float, y: float) -> dict[str, float]:
@@ -81,3 +81,27 @@ def test_does_not_infer_full_length_without_visible_local_endpoints():
     assert result["status"] == "insufficient_evidence"
     assert result["confidence"] == 0
     assert "eindeutig" in result["reason"]
+
+
+def test_recomputes_all_aggregates_after_manual_endpoint_corrections():
+    result = {
+        "status": "plausible",
+        "candidate_length_m": 280.0,
+        "length_delta_m": 10.0,
+        "maximum_endpoint_shift_m": 2.0,
+        "start_shift_m": 85.2,
+        "end_shift_m": 2.6,
+    }
+
+    _recompute_candidate_metrics(
+        result,
+        np.array([0.0, 0.0]),
+        np.array([201.1, 0.0]),
+        ground_scale=1.0,
+        osm_length=278.8,
+    )
+
+    assert result["candidate_length_m"] == 201.1
+    assert result["length_delta_m"] == -77.7
+    assert result["maximum_endpoint_shift_m"] == 85.2
+    assert result["status"] == "check"

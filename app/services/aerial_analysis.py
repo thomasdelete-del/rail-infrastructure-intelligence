@@ -304,7 +304,7 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
         corrected_end = result["candidate_end"]
         start_metric = np.array(_mercator(corrected_start["latitude"], corrected_start["longitude"]), dtype=float)
         end_metric = np.array(_mercator(corrected_end["latitude"], corrected_end["longitude"]), dtype=float)
-        result["candidate_length_m"] = round(float(np.linalg.norm(end_metric - start_metric)) * ground_scale, 1)
+        _recompute_candidate_metrics(result, start_metric, end_metric, ground_scale, osm_length)
     result.update({
         "station": "Friedberg (Hess)", "track": track,
         "osm": {"type": element["type"], "id": element["id"], "url": f"https://www.openstreetmap.org/{element['type']}/{element['id']}"},
@@ -315,3 +315,22 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
         "advisory_only": True,
     })
     return result
+
+
+def _recompute_candidate_metrics(
+    result: dict[str, Any], start_metric: np.ndarray, end_metric: np.ndarray,
+    ground_scale: float, osm_length: float,
+) -> None:
+    """Keep aggregate review values consistent after candidates are replaced."""
+    candidate_length = float(np.linalg.norm(end_metric - start_metric)) * ground_scale
+    result["candidate_length_m"] = round(candidate_length, 1)
+    result["length_delta_m"] = round(candidate_length - osm_length, 1)
+    endpoint_shifts = [
+        abs(float(result[key]))
+        for key in ("start_shift_m", "end_shift_m")
+        if result.get(key) is not None
+    ]
+    if endpoint_shifts:
+        maximum_shift = max(endpoint_shifts)
+        result["maximum_endpoint_shift_m"] = round(maximum_shift, 1)
+        result["status"] = "plausible" if maximum_shift <= 3 else "check"
