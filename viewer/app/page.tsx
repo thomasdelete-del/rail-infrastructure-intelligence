@@ -91,7 +91,7 @@ export default function Home() {
           <section className="rounded-xl border border-[#e9c9ad] bg-[#fff9f3] shadow-sm"><div className="flex items-center gap-2 border-b border-[#efd8c5] px-5 py-4 text-[#87420f]"><AlertTriangle size={18}/><h2 className="text-lg font-bold">Datenlücken</h2></div><div className="space-y-4 p-5">{state?.data_gaps.map((gap) => { const copy = gapLabels[gap.code] ?? { title: gap.code, text: gap.source }; return <div key={gap.code} className="flex gap-3"><MapPinOff size={17} className="mt-0.5 shrink-0 text-[#b25b18]"/><div><p className="text-sm font-semibold">{copy.title}</p><p className="mt-0.5 text-sm leading-5 text-[#73543d]">{copy.text}</p></div></div>; })}</div></section>
         </div>
       </div>
-      <PlatformDataTable reference={reference}/>
+      <PlatformDataTable reference={reference} inventory={inventory}/>
       <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="border-b border-border px-5 py-5 sm:px-6"><div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center"><div><h2 className="text-lg font-bold">Objektkatalog</h2><p className="mt-1 text-sm text-muted-foreground">Infrastruktur durchsuchen und Evidenz im Detail prüfen</p></div><label className="search-box"><Search size={17}/><span className="sr-only">Objekte durchsuchen</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Name, Gleis oder NeTEx-ID"/>{query ? <button aria-label="Suche löschen" onClick={() => setQuery('')}><X size={16}/></button> : null}</label></div>
           <div className="mt-4 flex flex-wrap gap-2" aria-label="Objekttyp filtern"><Filter size={16} className="mt-2 text-muted-foreground"/>{filters.map((filter) => <button key={filter} aria-pressed={typeFilter === filter} onClick={() => setTypeFilter(filter)} className="filter-button">{filter === 'all' ? 'Alle' : typeLabels[filter]}{filter !== 'all' && state ? <span>{state.object_types[filter] ?? 0}</span> : null}</button>)}</div>
@@ -113,14 +113,22 @@ export default function Home() {
 function Metric({ label, value, accent }: { label: string; value?: number; accent: string }) { return <div className={`metric metric-${accent}`}><p>{label}</p><strong>{value ?? '–'}</strong></div>; }
 function PlatformRow({ name, edges, index }: { name: string; edges: string[]; index: number }) { return <div className="platform-row"><div className="platform-index">B{index}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold text-muted-foreground">{name}</p><div className="mt-2 flex flex-wrap gap-2">{edges.map((edge) => <span key={edge} className="track-pill">Gleis {edge}</span>)}</div></div><div className="hidden h-1 w-20 rounded-full bg-[#f5a623] sm:block"/></div>; }
 
-function PlatformDataTable({ reference }: { reference: ReferenceStation | null }) {
+function PlatformDataTable({ reference, inventory }: { reference: ReferenceStation | null; inventory: Inventory | null }) {
   const value = (edge: ReferenceEdge, attribute: string) => edge.observations.find((item) => item.attribute === attribute);
-  const format = (observation?: ReferenceObservation) => observation ? `${String(observation.value)}${observation.unit ? ` ${observation.unit}` : ''}` : null;
-  const missing = <span className="data-missing">Nicht geliefert</span>;
+  const osmValue = (edge: ReferenceEdge, attribute: string) => inventory?.objects.find((item) => item.object_key === edge.object_id)?.observations.filter((item) => item.attribute === attribute && item.source_key === 'openstreetmap').at(-1);
+  const format = (observation?: ReferenceObservation | Evidence) => {
+    if (!observation) return null;
+    if (typeof observation.value === 'object' && observation.value) {
+      const coordinate = observation.value as { latitude?: number; longitude?: number };
+      return `${coordinate.latitude?.toFixed(6)}, ${coordinate.longitude?.toFixed(6)}`;
+    }
+    return `${String(observation.value)}${observation.unit ? ` ${observation.unit}` : ''}`;
+  };
+  const cell = (observation: ReferenceObservation | Evidence | undefined, source: string) => observation ? <div className="data-value"><strong>{format(observation)}</strong><span>{source}</span></div> : <span className="data-missing">Nicht geliefert</span>;
   return <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
     <div className="flex flex-col justify-between gap-2 border-b border-border px-5 py-4 sm:flex-row sm:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten je Gleis</h2><p className="mt-1 text-sm text-muted-foreground">Maße und Geokoordinaten mit klarer Kennzeichnung fehlender Quelldaten</p></div><span className="text-xs font-semibold text-muted-foreground">DB InfraGO · Stand 17.08.2026</span></div>
     <div className="platform-data-scroll"><table className="platform-data-table"><thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge</th><th>Nettobaulänge</th><th>Nutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead><tbody>
-      {reference?.platform_edges.map((edge) => <tr key={edge.object_id}><td><span className="track-pill">Gleis {edge.track}</span></td><td>{format(value(edge, 'platform_height')) ?? missing}</td><td>{format(value(edge, 'construction_length')) ?? missing}</td><td><strong>{format(value(edge, 'net_construction_length'))}</strong></td><td>{format(value(edge, 'usable_length')) ?? missing}</td><td>{format(value(edge, 'start_coordinates')) ?? missing}</td><td>{format(value(edge, 'end_coordinates')) ?? missing}</td></tr>)}
+      {reference?.platform_edges.map((edge) => <tr key={edge.object_id}><td><span className="track-pill">Gleis {edge.track}</span></td><td>{cell(value(edge, 'platform_height'), 'DB InfraGO')}</td><td>{cell(osmValue(edge, 'construction_length'), 'OSM · berechnet')}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{cell(value(edge, 'usable_length'), 'DB InfraGO')}</td><td>{cell(osmValue(edge, 'start_coordinates'), 'OSM')}</td><td>{cell(osmValue(edge, 'end_coordinates'), 'OSM')}</td></tr>)}
       {!reference ? Array.from({ length: 4 }, (_, index) => <tr key={index}><td colSpan={7}><div className="h-8 animate-pulse rounded bg-muted"/></td></tr>) : null}
     </tbody></table></div>
     <div className="platform-data-note"><AlertTriangle size={16}/><p>Die Nettobaulänge ist laut DB nicht als Zugnutzlänge geeignet. Anfangs- und Endkoordinaten werden nicht aus einem Mittelpunkt abgeleitet.</p></div>

@@ -18,7 +18,8 @@ def test_osm_maps_station_and_nearby_infrastructure_with_provenance():
         {"type": "node", "id": 2, "lat": 50.332, "lon": 8.761,
          "tags": {"highway": "elevator", "wheelchair": "yes"}},
         {"type": "way", "id": 3, "center": {"lat": 50.333, "lon": 8.762},
-         "tags": {"railway": "platform", "ref": "1"}},
+         "geometry": [{"lat": 50.332, "lon": 8.761}, {"lat": 50.333, "lon": 8.762}],
+         "tags": {"railway": "platform_edge", "ref": "1", "height": "0.76"}},
     ]}
     observations = parse_osm_friedberg(payload)
     assert any(item.object_key == ROOT_OBJECT_KEY and item.attribute == "latitude" for item in observations)
@@ -28,6 +29,11 @@ def test_osm_maps_station_and_nearby_infrastructure_with_provenance():
     assert lift.source_publisher == "OpenStreetMap contributors"
     station_number = next(item for item in observations if item.attribute == "station_number")
     assert station_number.value == 1930
+    edge = [item for item in observations if item.object_key == "FRI-PE-1"]
+    assert next(item.value for item in edge if item.attribute == "platform_height") == 760
+    length = next(item for item in edge if item.attribute == "construction_length")
+    assert length.is_derived and length.method == "geometry_calculation"
+    assert next(item.value for item in edge if item.attribute == "start_coordinates") == {"latitude": 50.332, "longitude": 8.761}
 
 
 def test_stada_maps_master_data_and_rejects_bavaria():

@@ -76,6 +76,9 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .platform-data-table tbody tr:last-child td { border-bottom: 0; }
 .platform-data-table tbody tr:hover { background: #f8fafb; }
 .data-missing { color: #7b8790; font-size: .8125rem; font-style: italic; }
+.data-value { display: flex; flex-direction: column; gap: 3px; }
+.data-value strong { color: #18313f; font-family: var(--font-app-mono), monospace; font-size: .8125rem; white-space: nowrap; }
+.data-value span { color: #60717a; font-size: .75rem; font-weight: 600; }
 .platform-data-note { display: flex; align-items: flex-start; gap: 9px; border-top: 1px solid #ead7c6; background: #fff9f3; padding: 13px 18px; color: #73543d; font-size: .8125rem; line-height: 1.45; }
 .platform-data-note svg { margin-top: 1px; flex: none; color: #b25b18; }
 
