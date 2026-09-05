@@ -211,6 +211,33 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
     const end = endDraft ?? coordinateValue(edge, 'end');
     return start && end ? distanceMetres(start, end) : null;
   };
+  const activeCoordinate = (edge: ReferenceEdge, coordinateType: 'start' | 'end') => coordinateDrafts[`${edge.object_id}:${coordinateType}`] ?? coordinateValue(edge, coordinateType);
+  const pairedTracks: Record<string, string> = { '2': '4', '4': '2', '5': '7', '7': '5', '8': '10', '10': '8', '11': '12', '12': '11' };
+  const osmPlausibility = (edge: ReferenceEdge) => {
+    const start = activeCoordinate(edge, 'start');
+    const end = activeCoordinate(edge, 'end');
+    const geometryLength = proposedLength(edge) ?? Number(osmValue(edge, 'construction_length')?.value);
+    const reasons: string[] = [];
+    let level: 'ok' | 'check' | 'high' = 'ok';
+    if (!start || !end || !Number.isFinite(geometryLength) || geometryLength <= 0) return { level: 'high' as const, reasons: ['Endpunkte oder Linienlänge fehlen'] };
+    const directDistance = distanceMetres(start, end);
+    const straightness = directDistance / geometryLength;
+    if (geometryLength < 80) { level = 'high'; reasons.push('OSM-Bahnsteigkante ungewöhnlich kurz'); }
+    if (straightness < 0.9 || straightness > 1.02) { level = level === 'high' ? 'high' : 'check'; reasons.push('Linienlänge und Endpunktdistanz sind nicht stimmig'); }
+    const partnerTrack = pairedTracks[edge.track];
+    const partner = reference?.platform_edges.find((item) => item.track === partnerTrack);
+    const partnerStart = partner ? activeCoordinate(partner, 'start') : null;
+    const partnerEnd = partner ? activeCoordinate(partner, 'end') : null;
+    if (partner && partnerStart && partnerEnd) {
+      const sameDirection = [distanceMetres(start, partnerStart), distanceMetres(end, partnerEnd)];
+      const oppositeDirection = [distanceMetres(start, partnerEnd), distanceMetres(end, partnerStart)];
+      const matched = sameDirection[0] + sameDirection[1] <= oppositeDirection[0] + oppositeDirection[1] ? sameDirection : oppositeDirection;
+      const largestEndOffset = Math.max(...matched);
+      if (largestEndOffset > 35) { level = 'high'; reasons.push(`Endlage weicht deutlich von Gleis ${partnerTrack} ab`); }
+      else if (largestEndOffset > 15) { level = level === 'high' ? 'high' : 'check'; reasons.push(`Endlage weicht von Gleis ${partnerTrack} ab`); }
+    }
+    return { level, reasons: reasons.length ? reasons : ['OSM-Geometrie intern plausibel'] };
+  };
   const comparison = (edge: ReferenceEdge) => {
     const osm = proposedLength(edge) ?? Number(osmValue(edge, 'construction_length')?.value);
     const db = Number(value(edge, 'net_construction_length')?.value);
@@ -225,7 +252,8 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
     const osmType = String(observation?.provenance?.osm_type ?? 'way');
     const osmId = observation?.provenance?.osm_id;
     const updatedLength = proposedLength(edge);
-    return <div className="data-value">{updatedLength !== null ? <div className="updated-length"><span className="updated-badge">Aktualisiert</span><strong>{updatedLength.toFixed(1)} m</strong><span>Neue OSM-Länge · Grundlage der Abweichung</span></div> : null}<strong>{format(observation) ?? 'Nicht geliefert'}</strong><span>OSM · bisherige Ist-Geometrie</span>{osmId ? <a className="source-data-link" href={`https://www.openstreetmap.org/${osmType}/${String(osmId)}`} target="_blank" rel="noreferrer">Original OSM {osmType} {String(osmId)} <ExternalLink size={11}/></a> : null}</div>;
+    const plausibility = osmPlausibility(edge);
+    return <div className="data-value">{updatedLength !== null ? <div className="updated-length"><span className="updated-badge">Aktualisiert</span><strong>{updatedLength.toFixed(1)} m</strong><span>Neue OSM-Länge · Grundlage der Abweichung</span></div> : null}<strong>{format(observation) ?? 'Nicht geliefert'}</strong><span>OSM · bisherige Ist-Geometrie</span><div className={`osm-plausibility osm-plausibility-${plausibility.level}`}><strong>{plausibility.level === 'ok' ? 'OSM plausibel' : plausibility.level === 'check' ? 'OSM prüfen' : 'OSM auffällig'}</strong>{plausibility.reasons.map((reason) => <span key={reason}>{reason}</span>)}</div>{osmId ? <a className="source-data-link" href={`https://www.openstreetmap.org/${osmType}/${String(osmId)}`} target="_blank" rel="noreferrer">Original OSM {osmType} {String(osmId)} <ExternalLink size={11}/></a> : null}</div>;
   };
   const usableLengthCell = (edge: ReferenceEdge) => {
     const rinf = rinfValue(edge);
