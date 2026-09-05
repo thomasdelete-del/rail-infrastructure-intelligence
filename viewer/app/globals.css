@@ -30,6 +30,17 @@ button, a { -webkit-tap-highlight-color: transparent; }
 button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offset: 3px; }
 
 .station-map-card { margin-bottom: 28px; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: white; box-shadow: 0 3px 14px rgb(7 27 43 / 7%); }
+.germany-map-card { margin-bottom: 28px; overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 3px 14px rgb(7 27 43 / 7%); }
+.germany-map-copy { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 20px 24px; }
+.germany-map-copy h2 { margin: 4px 0; color: #071b2b; font-size: 1.35rem; font-weight: 750; }
+.germany-map-copy p { color: var(--muted-foreground); font-size: .875rem; }
+.germany-map-copy form { display: flex; align-items: center; gap: 8px; min-width: 360px; border: 1px solid #adc2cc; border-radius: 8px; padding: 5px 6px 5px 12px; }
+.germany-map-copy input { min-width: 0; flex: 1; border: 0; outline: 0; font-size: .9rem; }
+.germany-map-copy button { border: 0; border-radius: 6px; background: #0b5278; padding: 8px 13px; color: #fff; font-weight: 700; }
+.germany-map { height: 390px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: #dce5e8; }
+.germany-map-status { display: flex; align-items: center; gap: 9px; padding: 12px 20px; color: #365767; font-size: .82rem; }
+.germany-map-status span { flex: 1; }
+@media (max-width: 700px) { .germany-map-copy { align-items: stretch; flex-direction: column; } .germany-map-copy form { min-width: 0; } .germany-map { height: 340px; } }
 .station-map-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 20px 24px; }
 .station-map-heading h2 { margin: 5px 0 0; color: #071b2b; font-size: 1.35rem; font-weight: 750; letter-spacing: -.02em; }
 .station-map-heading p:last-child { margin: 5px 0 0; color: var(--muted-foreground); font-size: .875rem; }
