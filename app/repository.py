@@ -117,13 +117,19 @@ def load_infrastructure_inventory(root_object_key: str, station: str) -> dict[st
             JOIN infrastructure_object parent ON parent.id = relation.object_id
             WHERE tree.depth < 5
         )
+        , ranked_tree AS (
+            SELECT tree.*,
+                   ROW_NUMBER() OVER (PARTITION BY tree.id ORDER BY tree.depth DESC, tree.parent_object_key NULLS LAST) AS path_rank
+            FROM tree
+        )
         SELECT DISTINCT tree.object_key, tree.object_type, tree.parent_object_key, tree.depth,
                observation.attribute, observation.value_json AS value, observation.unit,
                source.source_key, observation.observed_at, observation.provenance,
                observation.id AS observation_id
-        FROM tree
+        FROM ranked_tree tree
         LEFT JOIN observation ON observation.object_id = tree.id
         LEFT JOIN source ON source.id = observation.source_id
+        WHERE tree.path_rank = 1
         ORDER BY tree.depth, tree.object_type, tree.object_key, observation.observed_at, observation_id
     ''')
     with get_engine().connect() as connection:

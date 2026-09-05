@@ -97,6 +97,7 @@ def test_rinf_maps_current_usable_lengths_with_strict_identity_and_provenance():
     assert observation.quality_class == "A"
     assert observation.metadata["uopid"] == "DE00FFG"
     assert observation.metadata["valid_to"] == "2026-12-31"
+    assert "parent_object_key" not in observation.metadata
 
 
 def test_rinf_preserves_unmatched_platform_without_mapping_it_to_1a():

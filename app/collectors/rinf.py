@@ -56,9 +56,9 @@ def parse_rinf_platforms(data: dict[str, Any], on_date: date | None = None) -> l
             "rinf_property": "http://data.europa.eu/949/lengthOfPlatform",
             "rinf_platform_uri": canonical_uri,
             "identity_status": "matched_platform_id" if mapped else "unmatched_platform_id",
-            "parent_object_key": ROOT_OBJECT_KEY,
         }
         if not mapped:
+            metadata["parent_object_key"] = ROOT_OBJECT_KEY
             observations.append(CollectedObservation(
                 object_key=object_key, object_type="platform_edge", attribute="name", value=platform_id,
                 unit=None, source_key="era-rinf", source_url=canonical_uri,

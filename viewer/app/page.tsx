@@ -189,6 +189,21 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
     return `${String(observation.value)}${observation.unit ? ` ${observation.unit}` : ''}`;
   };
   const cell = (observation: ReferenceObservation | Evidence | undefined, source: string) => observation ? <div className="data-value"><strong>{format(observation)}</strong><span>{source}</span></div> : <span className="data-missing">Nicht geliefert</span>;
+  const osmGeometryCell = (edge: ReferenceEdge) => {
+    const observation = osmValue(edge, 'construction_length');
+    const osmType = String(observation?.provenance?.osm_type ?? 'way');
+    const osmId = observation?.provenance?.osm_id;
+    return <div className="data-value"><strong>{format(observation) ?? 'Nicht geliefert'}</strong><span>OSM · Geometrie</span>{osmId ? <a className="source-data-link" href={`https://www.openstreetmap.org/${osmType}/${String(osmId)}`} target="_blank" rel="noreferrer">Original OSM {osmType} {String(osmId)} <ExternalLink size={11}/></a> : null}</div>;
+  };
+  const usableLengthCell = (edge: ReferenceEdge) => {
+    const rinf = rinfValue(edge);
+    if (!rinf) return <div className="data-value"><span className="data-missing">Nicht in RINF zugeordnet</span><span>{edge.track === '1a' ? 'Gleis 49 bleibt separat' : 'ERA RINF'}</span></div>;
+    const osmLength = Number(osmValue(edge, 'construction_length')?.value);
+    const rinfLength = Number(rinf.value);
+    const delta = osmLength - rinfLength;
+    const suspicious = Number.isFinite(delta) && Math.abs(delta) > 10;
+    return <div className="data-value"><strong>{format(rinf)}</strong><span>ERA RINF · gültig 2026</span>{suspicious ? <span className="automatic-check">Prüfvorschlag: OSM {delta < 0 ? `${Math.abs(delta).toFixed(1)} m zu kurz` : `${delta.toFixed(1)} m länger`}</span> : <span className="automatic-ok">OSM-Länge plausibel</span>}</div>;
+  };
   const coordinateCell = (edge: ReferenceEdge, coordinateType: 'start' | 'end') => {
     const attribute = coordinateType === 'start' ? 'start_coordinates' : 'end_coordinates';
     const draft = coordinateDrafts[`${edge.object_id}:${coordinateType}`];
@@ -199,10 +214,10 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
   return <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
     <div className="flex flex-col justify-between gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten und Plausibilitätscheck</h2><p className="mt-1 text-sm text-muted-foreground">DB-Maße gegen OSM-Geometrie; Endpunkte können oben wahlweise auf Satellitenbild oder amtlichem Hessen-DOP geprüft werden.</p></div><div className="comparison-summary"><span className="comparison-low">{comparisons.filter((item) => item?.level === 'low').length} geringe</span><span className="comparison-check">{comparisons.filter((item) => item?.level === 'check').length} prüfen</span><span className="comparison-high">{comparisons.filter((item) => item?.level === 'high').length} auffällig</span></div></div>
     <div className="platform-data-scroll"><table className="platform-data-table"><thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Abweichung</th><th>Nutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead><tbody>
-      {reference?.platform_edges.map((edge) => { const deviation = comparison(edge); const usableLength = rinfValue(edge); return <tr key={edge.object_id} className={deviation?.level === 'high' ? 'row-deviation-high' : undefined}><td><button type="button" className="track-pill track-focus" onClick={() => onFocus(edge.object_id)}>Gleis {edge.track}</button></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td>{cell(osmValue(edge, 'construction_length'), 'OSM · Geometrie')}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{deviation ? <button type="button" className={`deviation deviation-${deviation.level} deviation-button`} onClick={() => onFocus(edge.object_id)} title="Auf der Karte anzeigen"><strong>{deviation.delta >= 0 ? '+' : ''}{deviation.delta.toFixed(1)} m</strong><span>{deviation.percent.toFixed(1)}% · {deviation.level === 'low' ? 'gering' : deviation.level === 'check' ? 'prüfen' : 'auffällig'}</span></button> : <span className="data-missing">Nicht vergleichbar</span>}</td><td>{usableLength ? cell(usableLength, 'ERA RINF · gültig 2026') : <div className="data-value"><span className="data-missing">Nicht in RINF zugeordnet</span><span>{edge.track === '1a' ? 'Gleis 49 bleibt separat' : 'ERA RINF'}</span></div>}</td><td>{coordinateCell(edge, 'start')}</td><td>{coordinateCell(edge, 'end')}</td></tr>; })}
+      {reference?.platform_edges.map((edge) => { const deviation = comparison(edge); return <tr key={edge.object_id} className={deviation?.level === 'high' ? 'row-deviation-high' : undefined}><td><button type="button" className="track-pill track-focus" onClick={() => onFocus(edge.object_id)}>Gleis {edge.track}</button></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td>{osmGeometryCell(edge)}</td><td>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}</td><td>{deviation ? <button type="button" className={`deviation deviation-${deviation.level} deviation-button`} onClick={() => onFocus(edge.object_id)} title="Auf der Karte anzeigen"><strong>{deviation.delta >= 0 ? '+' : ''}{deviation.delta.toFixed(1)} m</strong><span>{deviation.percent.toFixed(1)}% · {deviation.level === 'low' ? 'gering' : deviation.level === 'check' ? 'prüfen' : 'auffällig'}</span></button> : <span className="data-missing">Nicht vergleichbar</span>}</td><td>{usableLengthCell(edge)}</td><td>{coordinateCell(edge, 'start')}</td><td>{coordinateCell(edge, 'end')}</td></tr>; })}
       {!reference ? Array.from({ length: 4 }, (_, index) => <tr key={index}><td colSpan={8}><div className="h-8 animate-pulse rounded bg-muted"/></td></tr>) : null}
     </tbody></table></div>
-    <div className="platform-data-note"><AlertTriangle size={16}/><p>RINF-Nutzlängen sind der amtliche Betriebswert 1.2.1.0.6.4. Gleis 49 wird wegen fehlender eindeutiger Zuordnung nicht als Gleis 1a übernommen. Abweichung anklicken, um zur Kante zu springen; Quellenwerte werden nicht überschrieben.</p></div>
+    <div className="platform-data-note"><AlertTriangle size={16}/><p>Automatische Prüfvorschläge vergleichen OSM-Geometrie mit der RINF-Nutzlänge. Sie ändern keine Koordinate: Zur Kontrolle auf den Hinweis springen, Satellit oder amtliches Luftbild einschalten und Anfang/Ende manuell als separaten Vorschlag setzen. Gleis 49 wird nicht als 1a übernommen.</p></div>
   </section>;
 }
 

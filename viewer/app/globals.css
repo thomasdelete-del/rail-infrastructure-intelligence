@@ -117,6 +117,10 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .data-value { display: flex; flex-direction: column; gap: 3px; }
 .data-value strong { color: #18313f; font-family: var(--font-app-mono), monospace; font-size: .8125rem; white-space: nowrap; }
 .data-value span { color: #60717a; font-size: .75rem; font-weight: 600; }
+.source-data-link { display: inline-flex; align-items: center; gap: 4px; color: #0b5278; font-size: .7rem; font-weight: 750; text-decoration: none; white-space: nowrap; }
+.source-data-link:hover { text-decoration: underline; }
+.data-value .automatic-check { margin-top: 3px; border-radius: 4px; background: #fde9e6; padding: 3px 5px; color: #a63325; font-weight: 750; white-space: nowrap; }
+.data-value .automatic-ok { margin-top: 3px; color: #176944; font-weight: 750; }
 .comparison-summary { display: flex; flex-wrap: wrap; gap: 7px; font-size: .75rem; font-weight: 750; }
 .comparison-summary span { border-radius: 999px; padding: 5px 9px; }
 .comparison-low { background: #e8f6ef; color: #176944; }
