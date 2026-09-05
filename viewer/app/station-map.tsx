@@ -56,6 +56,7 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
   const satelliteLayerRef = useRef<TileLayer | null>(null);
   const aerialLayerRef = useRef<TileLayer | null>(null);
   const lastFocusedObjectRef = useRef<string | null>(null);
+  const hasFitInitialBoundsRef = useRef(false);
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [imageryOpacity, setImageryOpacity] = useState(65);
   const [mapReady, setMapReady] = useState(false);
@@ -142,7 +143,8 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, onSelect, o
         }
         marker.addTo(markerLayerRef.current!);
       });
-      if (points.length && mapRef.current) {
+      if (points.length && mapRef.current && !hasFitInitialBoundsRef.current) {
+        hasFitInitialBoundsRef.current = true;
         const bounds = L.latLngBounds(points.map((point) => [point.latitude, point.longitude] as [number, number]));
         mapRef.current.fitBounds(bounds.pad(0.12), { maxZoom: 18, animate: false });
       }
