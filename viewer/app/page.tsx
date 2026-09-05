@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronRight, Crosshair, Database, ExternalLink, Filter, MapPinOff, RefreshCw, Satellite, Search, ShieldCheck, TrainFront, X } from 'lucide-react';
 import { StationMap, type CoordinateEdit, type StationMapPoint } from './station-map';
 
@@ -178,7 +178,7 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
   const [osmConfirmed, setOsmConfirmed] = useState<Record<string, boolean>>({});
   const [aerialResults, setAerialResults] = useState<Record<string, AerialAnalysis>>({});
   const [aerialLoading, setAerialLoading] = useState<Record<string, boolean>>({});
-  const requestedAerialTracks = useRef(new Set<string>());
+  const [platformCheckEnabled, setPlatformCheckEnabled] = useState(false);
   useEffect(() => {
     try { setOsmConfirmed(JSON.parse(localStorage.getItem('friedberg-osm-confirmations') ?? '{}') as Record<string, boolean>); } catch { setOsmConfirmed({}); }
   }, []);
@@ -250,22 +250,29 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
     }
     return { level, reasons: reasons.length ? reasons : ['OSM-Geometrie intern plausibel'] };
   };
-  useEffect(() => {
-    if (!reference || !inventory) return;
-    reference.platform_edges.forEach((edge) => {
-      if (osmPlausibility(edge).level === 'ok' || requestedAerialTracks.current.has(edge.track)) return;
-      requestedAerialTracks.current.add(edge.track);
-      setAerialLoading((current) => ({ ...current, [edge.track]: true }));
-      void fetch(`${API}/stations/friedberg-hess/aerial-analysis/osm?track=${encodeURIComponent(edge.track)}`, { cache: 'no-store' })
-        .then(async (response) => {
+  const runPlatformChecks = async () => {
+    if (!reference || platformCheckEnabled) return;
+    setPlatformCheckEnabled(true);
+    setAerialResults({});
+    const tracks = reference.platform_edges.map((edge) => edge.track);
+    setAerialLoading(Object.fromEntries(tracks.map((track) => [track, true])));
+    for (let index = 0; index < tracks.length; index += 3) {
+      await Promise.all(tracks.slice(index, index + 3).map(async (track) => {
+        try {
+          const response = await fetch(`${API}/stations/friedberg-hess/aerial-analysis/osm?track=${encodeURIComponent(track)}`, { cache: 'no-store' });
           if (!response.ok) throw new Error('Luftbildanalyse nicht erreichbar');
           const result = await response.json() as AerialAnalysis;
-          setAerialResults((current) => ({ ...current, [edge.track]: result }));
-        })
-        .catch(() => setAerialResults((current) => ({ ...current, [edge.track]: { status: 'insufficient_evidence', confidence: 0, reason: 'Automatische Luftbildprüfung momentan nicht verfügbar', advisory_only: true } })))
-        .finally(() => setAerialLoading((current) => ({ ...current, [edge.track]: false })));
-    });
-  }, [reference, inventory, coordinateDrafts]);
+          setAerialResults((current) => ({ ...current, [track]: result }));
+        } catch {
+          setAerialResults((current) => ({ ...current, [track]: { status: 'insufficient_evidence', confidence: 0, reason: 'Keine eindeutige automatische Auswertung verfügbar', advisory_only: true } }));
+        } finally {
+          setAerialLoading((current) => ({ ...current, [track]: false }));
+        }
+      }));
+    }
+  };
+  const checkedCount = Object.keys(aerialResults).length;
+  const loadingCount = Object.values(aerialLoading).filter(Boolean).length;
   const comparison = (edge: ReferenceEdge) => {
     const osm = proposedLength(edge) ?? Number(osmValue(edge, 'construction_length')?.value);
     const db = Number(value(edge, 'net_construction_length')?.value);
@@ -300,7 +307,14 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, onFocus, on
     return <div className="coordinate-cell">{draft ? <div className="updated-coordinate"><span className="updated-badge">Aktualisiert</span><strong>{draft.latitude.toFixed(6)}, {draft.longitude.toFixed(6)}</strong><span>Aktive Koordinate</span></div> : null}<div className="data-value"><strong>{format(observation) ?? 'Nicht geliefert'}</strong><span>OpenStreetMap · bisheriger Istwert</span></div><button type="button" onClick={() => onEdit({ objectKey: edge.object_id, coordinateType, title: `Gleis ${edge.track}` })}><Crosshair size={13}/>{coordinateType === 'start' ? 'Anfang' : 'Ende'} anpassen</button></div>;
   };
   return <section className="mt-7 overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-    <div className="flex flex-col justify-between gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten und Plausibilitätscheck</h2><p className="mt-1 text-sm text-muted-foreground">DB-Maße gegen OSM-Geometrie; Endpunkte können oben wahlweise auf Satellitenbild oder amtlichem Hessen-DOP geprüft werden.</p></div><div className="comparison-summary"><span className="comparison-low">{comparisons.filter((item) => item?.level === 'low').length} geringe</span><span className="comparison-check">{comparisons.filter((item) => item?.level === 'check').length} prüfen</span><span className="comparison-high">{comparisons.filter((item) => item?.level === 'high').length} auffällig</span></div></div>
+    <div className="flex flex-col justify-between gap-3 border-b border-border px-5 py-4 lg:flex-row lg:items-end sm:px-6"><div><h2 className="text-lg font-bold">Bahnsteigdaten und Plausibilitätscheck</h2><p className="mt-1 text-sm text-muted-foreground">DB-Maße gegen OSM-Geometrie; die Bildprüfung verwendet zuerst das amtliche Hessen-DOP.</p></div><div className="comparison-summary"><span className="comparison-low">{comparisons.filter((item) => item?.level === 'low').length} geringe</span><span className="comparison-check">{comparisons.filter((item) => item?.level === 'check').length} prüfen</span><span className="comparison-high">{comparisons.filter((item) => item?.level === 'high').length} auffällig</span></div></div>
+    <div className="platform-check-panel">
+      <div><strong>Bahnsteigdaten prüfen</strong><span>OSM-Endpunkte und Längen aller Gleise automatisch mit dem amtlichen Luftbild vergleichen.</span></div>
+      <button type="button" className={platformCheckEnabled ? 'platform-check-switch platform-check-switch-on' : 'platform-check-switch'} aria-pressed={platformCheckEnabled} disabled={platformCheckEnabled} onClick={() => void runPlatformChecks()}><span aria-hidden="true"/>{platformCheckEnabled ? loadingCount ? `Prüfung läuft (${checkedCount}/${reference?.platform_edges.length ?? 0})` : 'Prüfung abgeschlossen' : 'Prüfung starten'}</button>
+    </div>
+    {platformCheckEnabled ? <div className="platform-check-results" aria-live="polite">
+      {reference?.platform_edges.map((edge) => { const result = aerialResults[edge.track]; const loading = aerialLoading[edge.track]; return <article key={edge.track} className={`platform-check-result ${result ? `platform-check-result-${result.status}` : ''}`}><button type="button" className="platform-result-track" onClick={() => onAerialReview(edge.object_id)}>Gleis {edge.track}</button>{loading ? <><strong>Amtliches Luftbild wird geprüft</strong><span>Bildkanten und OSM-Geometrie werden verglichen …</span></> : result ? <><strong>{result.status === 'plausible' ? 'OSM im Luftbild plausibel' : result.status === 'check' ? 'Abweichung prüfen' : result.status === 'high' ? 'Deutliche Abweichung' : 'Keine belastbare Auswertung'}</strong>{result.candidate_length_m !== undefined ? <span>Vorschlag {result.candidate_length_m.toFixed(1)} m · Konfidenz {Math.round(result.confidence * 100)}%</span> : <span>{result.reason}</span>}{result.maximum_endpoint_shift_m !== undefined ? <span>Endpunktabweichung bis {result.maximum_endpoint_shift_m.toFixed(1)} m</span> : null}<div className="platform-result-actions"><button type="button" onClick={() => onAerialReview(edge.object_id)}>Auf Karte zeigen</button>{result.candidate_start && result.candidate_end && result.status !== 'plausible' ? <button type="button" onClick={() => onApplySuggestion(edge.object_id, result.candidate_start!, result.candidate_end!)}>Prüfpunkte übernehmen</button> : null}</div></> : <><strong>Wartet</strong><span>Noch nicht geprüft</span></>}</article>; })}
+    </div> : null}
     <div className="platform-data-scroll"><table className="platform-data-table"><thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th className="length-column">Baulänge OSM</th><th>OSM-Daten bestätigt</th><th>Nettobaulänge DB</th><th>Abweichung OSM–DB</th><th className="length-column">Nutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead><tbody>
       {reference?.platform_edges.map((edge) => { const deviation = comparison(edge); const confirmed = Boolean(osmConfirmed[edge.object_id]); const dbNeedsReview = confirmed && deviation?.level === 'high'; return <tr key={edge.object_id} className={deviation?.level === 'high' ? 'row-deviation-high' : undefined}><td><button type="button" className="track-pill track-focus" onClick={() => onFocus(edge.object_id)}>Gleis {edge.track}</button></td><td>{cell(osmValue(edge, 'platform_height'), 'OpenStreetMap')}</td><td className="length-column">{osmGeometryCell(edge)}</td><td><button type="button" className={confirmed ? 'osm-confirm osm-confirmed' : 'osm-confirm'} aria-pressed={confirmed} onClick={() => toggleOsmConfirmation(edge.object_id)}><ShieldCheck size={15}/>{confirmed ? 'Bestätigt' : 'Bestätigen'}</button></td><td><div className={dbNeedsReview ? 'db-length-review' : undefined}>{cell(value(edge, 'net_construction_length'), 'DB InfraGO')}{dbNeedsReview ? <span>DB-Nettobaulänge anzupassen: bestätigte OSM-Länge weicht wesentlich ab</span> : null}</div></td><td>{deviation ? <button type="button" className={`deviation deviation-${deviation.level} deviation-button`} onClick={() => onFocus(edge.object_id)} title="Auf der Karte anzeigen"><strong>OSM {Math.abs(deviation.delta).toFixed(1)} m {deviation.delta >= 0 ? 'länger' : 'kürzer'}</strong><span>als DB · {deviation.percent.toFixed(1)}% · {deviation.level === 'low' ? 'gering' : deviation.level === 'check' ? 'prüfen' : 'auffällig'}</span></button> : <span className="data-missing">Nicht vergleichbar</span>}</td><td className="length-column">{usableLengthCell(edge)}</td><td>{coordinateCell(edge, 'start')}</td><td>{coordinateCell(edge, 'end')}</td></tr>; })}
       {!reference ? Array.from({ length: 4 }, (_, index) => <tr key={index}><td colSpan={9}><div className="h-8 animate-pulse rounded bg-muted"/></td></tr>) : null}
