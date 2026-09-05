@@ -20,8 +20,9 @@ def feature_vector(features: dict[str, Any]) -> np.ndarray:
 
 
 def store_training_sample(track: str, endpoint: str, accepted: bool, features: dict[str, Any],
-                          corrected_coordinate: dict[str, float] | None = None) -> int:
-    return store_observations([{
+                          corrected_coordinate: dict[str, float] | None = None,
+                          confirmed_coordinate: dict[str, float] | None = None) -> int:
+    observations = [{
         "object_key": f"FRI-OSM-platform-edge-{track}", "object_type": "platform_edge",
         "attribute": ATTRIBUTE,
         "value": {"track": track, "endpoint": endpoint, "accepted": accepted, "features": features,
@@ -30,7 +31,18 @@ def store_training_sample(track: str, endpoint: str, accepted: bool, features: d
         "source_type": "human_review", "quality_class": "B", "method": "supervised_label",
         "is_derived": False,
         "metadata": {"station": "Friedberg (Hess)", "imagery": "Hessen DOP20"},
-    }])
+    }]
+    if accepted and confirmed_coordinate:
+        observations.append({
+            "object_key": f"FRI-OSM-platform-edge-{track}", "object_type": "platform_edge",
+            "attribute": f"confirmed_{endpoint}_coordinates", "value": confirmed_coordinate,
+            "source_key": SOURCE_KEY, "source_publisher": "Manuelle Luftbildprüfung",
+            "source_type": "human_review", "quality_class": "B", "method": "manual_confirmation",
+            "is_derived": False, "note": "OSM-Endpunkt im amtlichen Luftbild bestätigt",
+            "metadata": {"station": "Friedberg (Hess)", "imagery": "Hessen DOP20",
+                         "original_source": "OpenStreetMap", "endpoint": endpoint},
+        })
+    return store_observations(observations)
 
 
 def training_samples() -> list[dict[str, Any]]:

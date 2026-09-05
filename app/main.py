@@ -94,6 +94,7 @@ class AerialTrainingFeedback(BaseModel):
     accepted: bool
     features: dict
     corrected_coordinate: dict[str, float] | None = None
+    confirmed_coordinate: dict[str, float] | None = None
 
 
 @app.post("/stations/friedberg-hess/aerial-analysis/training-feedback")
@@ -101,7 +102,7 @@ def aerial_training_feedback(feedback: AerialTrainingFeedback):
     if feedback.endpoint not in {"start", "end"}:
         raise HTTPException(status_code=422, detail="endpoint must be start or end")
     stored = store_training_sample(feedback.track, feedback.endpoint, feedback.accepted, feedback.features,
-                                   feedback.corrected_coordinate)
+                                   feedback.corrected_coordinate, feedback.confirmed_coordinate)
     return {"stored": stored, "learning": "supervised_online_logistic_regression"}
 
 @app.get("/stations/friedberg-hess/change-report/rinf")

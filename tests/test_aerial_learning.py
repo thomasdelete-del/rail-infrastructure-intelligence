@@ -33,3 +33,15 @@ def test_latest_manual_correction_wins(monkeypatch):
     ])
     assert aerial_learning.latest_correction("5", "start") == {"latitude": 50.2, "longitude": 8.2}
     assert aerial_learning.latest_correction("5", "end") is None
+
+
+def test_accepted_endpoint_is_stored_as_separate_confirmed_observation(monkeypatch):
+    captured = []
+    monkeypatch.setattr(aerial_learning, "store_observations", lambda items: captured.extend(items) or len(items))
+    stored = aerial_learning.store_training_sample(
+        "8", "end", True, {"prominence": 5}, confirmed_coordinate={"latitude": 50.3, "longitude": 8.7})
+    assert stored == 2
+    assert captured[0]["attribute"] == aerial_learning.ATTRIBUTE
+    assert captured[1]["attribute"] == "confirmed_end_coordinates"
+    assert captured[1]["value"] == {"latitude": 50.3, "longitude": 8.7}
+    assert captured[1]["method"] == "manual_confirmation"

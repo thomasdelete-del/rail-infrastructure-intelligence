@@ -95,7 +95,8 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
     try {
       const response = await fetch(`${API}/stations/friedberg-hess/aerial-analysis/training-feedback`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ track: currentTrack, endpoint, accepted, features }),
+        body: JSON.stringify({ track: currentTrack, endpoint, accepted, features,
+          confirmed_coordinate: accepted ? { latitude: currentReviewPoint.latitude, longitude: currentReviewPoint.longitude } : null }),
       });
       if (!response.ok) throw new Error();
       setFeedbackSelections((current) => {
