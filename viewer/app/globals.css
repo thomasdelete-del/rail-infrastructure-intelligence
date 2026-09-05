@@ -40,6 +40,12 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .germany-map { height: 390px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: #dce5e8; }
 .germany-map-status { display: flex; align-items: center; gap: 9px; padding: 12px 20px; color: #365767; font-size: .82rem; }
 .germany-map-status span { flex: 1; }
+.selected-station-card { overflow: hidden; border: 1px solid var(--border); border-radius: 14px; background: #fff; box-shadow: 0 3px 14px rgb(7 27 43 / 7%); }
+.selected-station-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 20px 24px; }
+.selected-station-heading h2 { margin: 4px 0; color: #071b2b; font-size: 1.5rem; font-weight: 750; }
+.selected-station-heading p { color: var(--muted-foreground); font-size: .875rem; }
+.selected-station-heading button { border: 1px solid #0b5278; border-radius: 7px; padding: 8px 13px; color: #0b5278; font-weight: 700; }
+.selected-station-map { height: 520px; border-top: 1px solid var(--border); background: #dce5e8; }
 @media (max-width: 700px) { .germany-map-copy { align-items: stretch; flex-direction: column; } .germany-map-copy form { min-width: 0; } .germany-map { height: 340px; } }
 .station-map-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 20px 24px; }
 .station-map-heading h2 { margin: 5px 0 0; color: #071b2b; font-size: 1.35rem; font-weight: 750; letter-spacing: -.02em; }

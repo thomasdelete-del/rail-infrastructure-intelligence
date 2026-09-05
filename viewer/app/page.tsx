@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, ChevronRight, Crosshair, Database, ExternalLink, Filter, MapPinOff, RefreshCw, Satellite, Search, ShieldCheck, TrainFront, X } from 'lucide-react';
 import { StationMap, type AerialReviewAnalysis, type CoordinateEdit, type StationMapPoint } from './station-map';
-import { GermanyStationMap } from './germany-station-map';
+import { GermanyStationMap, SelectedStationMap, type Station } from './germany-station-map';
 
 const API = 'https://rail-infrastructure-intelligence-production.up.railway.app';
 type Evidence = { attribute: string; value: unknown; unit: string | null; source_key: string; provenance?: Record<string, unknown> };
@@ -55,6 +55,7 @@ export default function Home() {
   const [coordinateDrafts, setCoordinateDrafts] = useState<CoordinateDrafts>({});
   const [aerialReviewRequest, setAerialReviewRequest] = useState<{ objectKey: string; nonce: number; coordinateType?: 'start' | 'end'; analysis?: AerialAnalysis } | null>(null);
   const [aerialResults, setAerialResults] = useState<Record<string, AerialAnalysis>>({});
+  const [selectedStation, setSelectedStation] = useState<Station | null>(null);
 
   async function load() {
     setRefreshing(true); setError(false);
@@ -145,6 +146,8 @@ export default function Home() {
     document.getElementById('station-map')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }, []);
 
+  if (selectedStation && !selectedStation.available) return <main className="min-h-screen bg-background text-foreground"><header className="border-b border-border bg-[#071b2b] text-white"><div className="mx-auto flex max-w-[1440px] items-center gap-3 px-5 py-4 lg:px-10"><span className="grid h-10 w-10 place-items-center rounded-md bg-[#f5a623] text-[#071b2b]"><TrainFront size={22}/></span><div><p className="text-sm font-semibold tracking-wide">DB INFRASTRUKTURDATEN</p><p className="text-xs text-slate-300">Deutschlandweite Bahnhofsauswahl</p></div></div></header><div className="mx-auto max-w-[1440px] px-5 py-7 lg:px-10 lg:py-10"><GermanyStationMap onSelect={setSelectedStation}/><SelectedStationMap station={selectedStation} onBack={() => setSelectedStation(null)}/></div></main>;
+
   return <main className="min-h-screen bg-background text-foreground">
     <header className="border-b border-border bg-[#071b2b] text-white"><div className="mx-auto flex max-w-[1440px] items-center justify-between px-5 py-4 lg:px-10">
       <div className="flex items-center gap-3"><span className="grid h-10 w-10 place-items-center rounded-md bg-[#f5a623] text-[#071b2b]"><TrainFront size={22}/></span><div><p className="text-sm font-semibold tracking-wide">DB INFRASTRUKTURDATEN</p><p className="text-xs text-slate-300">Pilot Friedberg (Hess)</p></div></div>
@@ -153,7 +156,7 @@ export default function Home() {
     <div className="mx-auto max-w-[1440px] px-5 py-7 lg:px-10 lg:py-10">
       <section className="mb-7 flex flex-col justify-between gap-4 lg:flex-row lg:items-end"><div><p className="mb-2 text-sm font-semibold uppercase tracking-[0.16em] text-[#b25b18]">Infrastruktur-Viewer</p><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Friedberg (Hess)</h1><p className="mt-2 text-base text-muted-foreground">Quellenbelegter Ist-Zustand aus mehreren unabhängigen Datenquellen</p></div><div className="flex items-center gap-2 text-sm text-muted-foreground"><Database size={16}/>{updated ? `Abgerufen ${updated.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}` : 'Live-Daten werden geladen'}</div></section>
       {error ? <section className="mb-7 rounded-lg border border-red-300 bg-red-50 p-5 text-red-900"><p className="font-semibold">Datenquelle momentan nicht erreichbar</p><p className="mt-1 text-sm">Bitte in einigen Sekunden erneut aktualisieren.</p></section> : null}
-      <GermanyStationMap onSelect={(station) => { if (station.available) document.getElementById('station-map')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}/>
+      <GermanyStationMap onSelect={(station) => { setSelectedStation(station); if (station.available) document.getElementById('station-map')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}/>
       <StationMap points={mapPoints} focusObjectKey={focusObjectKey} coordinateEdit={coordinateEdit} aerialReviewRequest={aerialReviewRequest} aerialResults={aerialResults} onSelect={setSelectedKey} onNavigateEndpoint={(objectKey, analysis, coordinateType) => setAerialReviewRequest({ objectKey, analysis, coordinateType, nonce: Date.now() })} onBeginCoordinateEdit={setCoordinateEdit} onCoordinateChange={handleCoordinateChange} onCancelEdit={() => setCoordinateEdit(null)}/>
       <PlatformDataTable reference={reference} inventory={inventory} coordinateDrafts={coordinateDrafts} aerialResults={aerialResults} onResetAerialResults={() => setAerialResults({})} onAerialResult={(objectKey, result) => setAerialResults((current) => ({ ...current, [objectKey]: result }))} onFocus={focusPlatform} onAerialReview={(objectKey, analysis, coordinateType) => { focusPlatform(objectKey); setAerialReviewRequest({ objectKey, analysis, coordinateType, nonce: Date.now() }); }} onApplySuggestion={applyCoordinateSuggestion} onEdit={(edit) => { setCoordinateEdit(edit); focusPlatform(edit.objectKey); }}/>
       <section className="mb-7 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Infrastrukturobjekte" value={state?.object_count} accent="navy"/><Metric label="Bahnsteigkanten" value={state?.object_types.platform_edge} accent="orange"/><Metric label="Ausstattung" value={state?.object_types.equipment} accent="steel"/><Metric label="Aktuelle Konflikte" value={state?.conflict_count} accent="green"/></section>
