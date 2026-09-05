@@ -1,5 +1,6 @@
 from datetime import date
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
 from app.collectors.openstation import OpenStationCollector
 from app.database import database_health
 from app.repository import load_infrastructure_inventory, summarize_infrastructure_inventory
@@ -9,10 +10,20 @@ from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SO
 from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBERG_SERVICE_TRACK_CONFLICTS, SOURCE_2026 as SERVICE_TRACK_SOURCE
 from app.services.change_report import build_change_report
 
-app = FastAPI(title="Rail Infrastructure Intelligence", version="0.9.0", description="Source-aware digital infrastructure twin for railway stations.")
+app = FastAPI(title="Rail Infrastructure Intelligence", version="1.0.0", description="Source-aware digital infrastructure twin for railway stations.")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://friedberg-infrastruktur-viewer.jaunty-slug-3693.chatgpt.site",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
-def root(): return {"service": "rail-infrastructure-intelligence", "version": "0.9.0", "pilot": "Friedberg (Hess)", "docs": "/docs"}
+def root(): return {"service": "rail-infrastructure-intelligence", "version": "1.0.0", "pilot": "Friedberg (Hess)", "docs": "/docs"}
 
 @app.get("/health")
 def health(): return {"status": "ok"}

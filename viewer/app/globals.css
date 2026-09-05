@@ -1,0 +1,42 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --font-sans: var(--font-app-sans);
+  --font-mono: var(--font-app-mono);
+}
+
+:root {
+  --background: #f3f6f7;
+  --foreground: #102330;
+  --card: #ffffff;
+  --muted: #e7edef;
+  --muted-foreground: #5d6c75;
+  --border: #ced9de;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--font-app-sans), Arial, sans-serif; background: var(--background); }
+button, a { -webkit-tap-highlight-color: transparent; }
+button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offset: 3px; }
+
+.metric { position: relative; overflow: hidden; min-height: 132px; border: 1px solid var(--border); border-radius: 12px; background: white; padding: 20px; box-shadow: 0 2px 8px rgb(7 27 43 / 5%); }
+.metric::before { position: absolute; inset: 0 auto 0 0; width: 5px; content: ''; background: var(--metric); }
+.metric p { color: var(--muted-foreground); font-size: .875rem; font-weight: 600; }
+.metric strong { display: block; margin-top: 14px; color: #071b2b; font-family: var(--font-app-mono), monospace; font-size: 2.25rem; line-height: 1; }
+.metric-navy { --metric: #0b5278; } .metric-orange { --metric: #f5a623; } .metric-steel { --metric: #668391; } .metric-green { --metric: #20845a; }
+.platform-row { display: flex; min-height: 76px; align-items: center; gap: 16px; border: 1px solid #d7e0e4; border-radius: 9px; background: linear-gradient(90deg, #f8fafb, #fff); padding: 14px 16px; }
+.platform-index { display: grid; height: 44px; width: 44px; flex: none; place-items: center; border-radius: 5px; background: #0b5278; color: white; font-family: var(--font-app-mono), monospace; font-weight: 600; }
+.track-pill { display: inline-flex; min-height: 30px; align-items: center; border-radius: 4px; border: 1px solid #d8932e; background: #fff4df; padding: 3px 10px; color: #70440b; font-family: var(--font-app-mono), monospace; font-size: .875rem; font-weight: 600; }
+.status-ok { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border-radius: 999px; background: #e8f6ef; padding: 4px 10px; color: #176944; font-size: .75rem; font-weight: 700; white-space: nowrap; }
+
+@media (max-width: 520px) { .status-ok { max-width: 34px; overflow: hidden; padding: 8px; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }
