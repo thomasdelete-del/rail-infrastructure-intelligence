@@ -35,4 +35,21 @@ def test_maps_bruchenbruecken_crosswalk_and_unique_remainder():
     assert mapped["1"]["mapping_method"] == "station_crosswalk"
     assert mapped["2"]["platform_id"] == "538"
     assert mapped["2"]["mapping_method"] == "bijective_remainder"
+    assert mapped["1"]["mapping_score"] == 100
+    assert mapped["2"]["mapping_score"] == 80
     assert used == {"293", "538"}
+
+
+def test_maps_lispenhausen_platform_962_to_public_track_1():
+    db = [{"track": "1"}, {"track": "2"}]
+    rinf = [
+        {"platform_id": "962", "track_id": "962_125263", "usable_length_m": 174},
+        {"platform_id": "970", "track_id": "970_125262", "usable_length_m": 135},
+    ]
+    mapped, used = map_rinf_platforms(db, rinf, "FLIH")
+    assert mapped["1"]["platform_id"] == "962"
+    assert mapped["1"]["mapping_method"] == "station_crosswalk"
+    assert mapped["1"]["mapping_score"] == 100
+    assert mapped["2"]["platform_id"] == "970"
+    assert mapped["2"]["mapping_method"] == "bijective_remainder"
+    assert used == {"962", "970"}

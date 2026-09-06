@@ -19,6 +19,7 @@ _INDEX_LOCK = asyncio.Lock()
 # RINF platform IDs are not public passenger track numbers.
 RINF_PLATFORM_CROSSWALKS: dict[str, dict[str, str]] = {
     "FBB": {"293": "1"},
+    "FLIH": {"962": "1"},
 }
 
 
@@ -76,17 +77,17 @@ def map_rinf_platforms(db_platforms: list[dict[str, Any]], rinf_platforms: list[
     rinf_by_id = {row["platform_id"]: row for row in rinf_platforms}
     for db in db_platforms:
         if db["track"] in rinf_by_id:
-            mapped[db["track"]] = {**rinf_by_id[db["track"]], "mapping_method": "exact_platform_id", "mapping_confidence": "confirmed"}
+            mapped[db["track"]] = {**rinf_by_id[db["track"]], "mapping_method": "exact_platform_id", "mapping_confidence": "confirmed", "mapping_score": 100, "mapping_evidence": ["exact_platform_id"]}
             used.add(db["track"])
     for rinf_id, db_track in RINF_PLATFORM_CROSSWALKS.get(ril, {}).items():
         if rinf_id in rinf_by_id and any(row["track"] == db_track for row in db_platforms):
-            mapped[db_track] = {**rinf_by_id[rinf_id], "mapping_method": "station_crosswalk", "mapping_confidence": "confirmed"}
+            mapped[db_track] = {**rinf_by_id[rinf_id], "mapping_method": "station_crosswalk", "mapping_confidence": "confirmed", "mapping_score": 100, "mapping_evidence": [f"station_crosswalk:{ril}:{rinf_id}->{db_track}"]}
             used.add(rinf_id)
     remaining_db = [row for row in db_platforms if row["track"] not in mapped]
     remaining_rinf = [row for row in rinf_platforms if row["platform_id"] not in used]
     if len(remaining_db) == len(remaining_rinf) == 1:
         row = remaining_rinf[0]
-        mapped[remaining_db[0]["track"]] = {**row, "mapping_method": "bijective_remainder", "mapping_confidence": "derived"}
+        mapped[remaining_db[0]["track"]] = {**row, "mapping_method": "bijective_remainder", "mapping_confidence": "derived", "mapping_score": 80, "mapping_evidence": ["all_other_platform_edges_uniquely_assigned"]}
         used.add(row["platform_id"])
     return mapped, used
 
@@ -138,7 +139,7 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
     platforms = []
     for row in db_platforms:
         usable = by_track.get(row["track"])
-        platforms.append({**row, "usable_length_m": usable["usable_length_m"] if usable else None, "rinf_platform_id": usable["platform_id"] if usable else None, "rinf_track_id": usable.get("track_id") if usable else None, "mapping_method": usable.get("mapping_method") if usable else None, "mapping_confidence": usable.get("mapping_confidence") if usable else None})
+        platforms.append({**row, "usable_length_m": usable["usable_length_m"] if usable else None, "rinf_platform_id": usable["platform_id"] if usable else None, "rinf_track_id": usable.get("track_id") if usable else None, "mapping_method": usable.get("mapping_method") if usable else None, "mapping_confidence": usable.get("mapping_confidence") if usable else None, "mapping_score": usable.get("mapping_score") if usable else None, "mapping_evidence": usable.get("mapping_evidence") if usable else []})
     for row in rinf_platforms:
         if row["platform_id"] not in used_rinf_ids:
             platforms.append({"track": row["platform_id"], "platform_height_mm": None, "net_construction_length_m": None, "usable_length_m": row["usable_length_m"], "rinf_platform_id": row["platform_id"], "rinf_track_id": row.get("track_id"), "mapping_method": "unmapped", "mapping_confidence": "unresolved"})
