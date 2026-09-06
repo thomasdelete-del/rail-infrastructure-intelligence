@@ -728,9 +728,9 @@ export function GermanyStationMap({
       stations.forEach((s) => {
         const safeName = escapeHtml(s.name);
         const marker = L.circleMarker([s.latitude, s.longitude], {
-          radius: 5,
+          radius: 2.5,
           color: '#fff',
-          weight: 2,
+          weight: 1,
           fillColor: '#0b6b8a',
           fillOpacity: 1,
         })
