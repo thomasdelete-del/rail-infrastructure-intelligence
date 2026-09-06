@@ -103,6 +103,8 @@ export function SelectedStationMap({
     if (point) mapRef.current?.setView([point.lat, point.lon], 21, { animate: false });
   };
   useEffect(() => {
+    setIdentity(null);
+    setDbSources({});
     const controller = new AbortController();
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
     void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
@@ -113,6 +115,10 @@ export function SelectedStationMap({
   }, [station]);
   useEffect(() => {
     if (!el.current) return;
+    setLoading(true);
+    setCounts({ platforms: 0, entrances: 0, equipment: 0 });
+    setPlatformEdges([]);
+    setImagery('none');
     let disposed = false;
     let instance: LeafletMap | null = null;
     void import('leaflet').then(async (L) => {
@@ -245,10 +251,11 @@ export function SelectedStationMap({
           <p className="map-kicker">KARTENEINSTIEG</p>
           <h2>{displayName} im Lageplan</h2>
           <p>
-            Stationsstammdaten aus DB InfraGO NeTEx; europäische Register ergänzen. OpenStreetMap liefert nachrangig die Geometrie.
+            Stationsstammdaten aus DB InfraGO StaDa; NeTEx und europäische Register ergänzen. OpenStreetMap liefert nachrangig die Geometrie.
           </p>
           <div className="selected-station-meta">
-            <span>DB InfraGO NeTEx: {dbSources.netex ?? 'wird geprüft'} · Primärquelle</span>
+            <span>DB InfraGO StaDa: {dbSources.stada ?? 'wird geprüft'} · Primärquelle</span>
+            <span>DB InfraGO NeTEx: {dbSources.netex ?? 'wird geprüft'} · Infrastrukturergänzung</span>
             <span>ERA RINF: {dbSources.rinf ?? 'wird geprüft'} · amtliche Ergänzung</span>
             <span>OpenStreetMap: {dbSources.osm ?? 'wird geprüft'} · nur Geometrie/Gegenprüfung</span>
             <span>
@@ -258,7 +265,6 @@ export function SelectedStationMap({
             </span>
             {identity ? <><span>OSM-ID: {identity.osm}</span><span>EVA/IBNR: {identity.eva ?? 'nicht gepflegt'}</span><span>RIL100: {identity.ril ?? 'nicht gepflegt'}</span><span>DB-Stationsnummer: {identity.stationNumber ?? 'nicht gepflegt'}</span></> : <span>Stationskennung konnte nicht eindeutig ermittelt werden</span>}
             <span>{identity?.eva || identity?.ril || identity?.stationNumber ? 'Identitäts-Gate: Kennung gefunden' : 'DB-Quellen: eindeutige Kennung fehlt'}</span>
-            <span>DB StaDa: {dbSources.stada ?? 'wird geprüft'}</span>
             <span>DB FaSta: {dbSources.fasta ?? 'wird geprüft'}{dbSources.facilities !== undefined ? ` · ${dbSources.facilities} Anlagen` : ''}</span>
           </div>
         </div>

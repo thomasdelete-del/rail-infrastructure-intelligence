@@ -7,21 +7,21 @@ from typing import Any
 import httpx
 
 
-def normalize_stada(data: dict[str, Any], station_number: str) -> dict[str, Any] | None:
+def normalize_stada(data: dict[str, Any], station_number: str | int) -> dict[str, Any] | None:
     records = data.get("result", []) if isinstance(data.get("result"), list) else [data]
-    station = next((item for item in records if str(item.get("number")) == station_number), None)
+    station = next((item for item in records if str(item.get("number")) == str(station_number)), None)
     if not station:
         return None
     return {key: station.get(key) for key in ("number", "name", "category", "evaNumbers", "ril100Identifiers", "mailingAddress", "hasSteplessAccess", "hasWiFi") if station.get(key) is not None}
 
 
-def normalize_fasta(data: dict[str, Any] | list[dict[str, Any]], station_number: str) -> list[dict[str, Any]]:
+def normalize_fasta(data: dict[str, Any] | list[dict[str, Any]], station_number: str | int) -> list[dict[str, Any]]:
     facilities = data if isinstance(data, list) else data.get("facilities", [])
     return [{key: item.get(key) for key in ("equipmentnumber", "type", "state", "description", "geocoordX", "geocoordY")}
-            for item in facilities if str(item.get("stationnumber")) == station_number]
+            for item in facilities if str(item.get("stationnumber")) == str(station_number)]
 
 
-async def collect_db_station_sources(station_number: str | None) -> dict[str, Any]:
+async def collect_db_station_sources(station_number: str | int | None) -> dict[str, Any]:
     client_id, api_key = os.getenv("DB_API_CLIENT_ID"), os.getenv("DB_API_KEY")
     if not station_number:
         return {"stada": {"status": "identity_missing"}, "fasta": {"status": "identity_missing"}}
