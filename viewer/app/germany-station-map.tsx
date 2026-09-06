@@ -46,6 +46,15 @@ const distance = (a: { lat: number; lon: number }, b: { lat: number; lon: number
 
 const geometryLength = (geometry: Array<{ lat: number; lon: number }>) =>
   geometry.slice(1).reduce((sum, point, index) => sum + distance(geometry[index], point), 0);
+
+const platformAxis = (geometry: Array<{ lat: number; lon: number }>) => {
+  let best: [{ lat: number; lon: number }, { lat: number; lon: number }, number] | null = null;
+  geometry.forEach((start, startIndex) => geometry.slice(startIndex + 1).forEach((end) => {
+    const length = distance(start, end);
+    if (!best || length > best[2]) best = [start, end, length];
+  }));
+  return best;
+};
 export function SelectedStationMap({
   station,
   onBack,
@@ -135,10 +144,10 @@ export function SelectedStationMap({
         if (!response.ok) throw new Error();
         const data = (await response.json()) as { elements: OsmElement[] };
         if (disposed) return;
-        let platforms = 0,
-          entrances = 0,
+        let entrances = 0,
           equipment = 0;
-        const edges: PlatformEdge[] = [];
+        const explicitEdges: PlatformEdge[] = [];
+        const platformCandidates: PlatformEdge[] = [];
         const seen = new Set<string>();
         data.elements.forEach((item) => {
           const key = `${item.type}-${item.id}`;
@@ -152,25 +161,18 @@ export function SelectedStationMap({
           const isEntrance =
             tags.railway === 'subway_entrance' || Boolean(tags.entrance);
           if (isStation) return;
-          if (isPlatform) platforms++;
-          else if (isEntrance) entrances++;
-          else equipment++;
+          if (isEntrance) entrances++;
+          else if (!isPlatform) equipment++;
           if (item.geometry?.length && isPlatformEdge) {
             const edge = { id: `${item.type}-${item.id}`, track: tags.ref || tags.local_ref || 'ohne Nummer', geometry: item.geometry, length: geometryLength(item.geometry), height: tags.height };
-            edges.push(edge);
-            L.polyline(
-              item.geometry.map((p) => [p.lat, p.lon] as [number, number]),
-              { color: '#00a6c7', weight: 5, opacity: 0.9 },
-            )
-              .bindTooltip(
-                tags.ref ? `Bahnsteig ${escapeHtml(tags.ref)}` : 'Bahnsteig',
-              )
-              .addTo(instance!);
-            const start = item.geometry[0], end = item.geometry.at(-1)!;
-            L.circleMarker([start.lat, start.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#20a464', fillOpacity: 1 }).addTo(instance!);
-            L.circleMarker([end.lat, end.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#d54532', fillOpacity: 1 }).addTo(instance!);
+            explicitEdges.push(edge);
           } else if (item.geometry?.length && isPlatform) {
             L.polyline(item.geometry.map((p) => [p.lat, p.lon] as [number, number]), { color: '#0b5278', weight: 3, opacity: .55 }).addTo(instance!);
+            const axis = platformAxis(item.geometry);
+            if (axis && axis[2] >= 40 && tags.railway === 'platform') platformCandidates.push({
+              id: `${item.type}-${item.id}`, track: tags.ref || tags.local_ref || '',
+              geometry: [axis[0], axis[1]], length: axis[2], height: tags.height,
+            });
           } else {
             const lat = item.lat ?? item.center?.lat,
               lon = item.lon ?? item.center?.lon;
@@ -196,7 +198,16 @@ export function SelectedStationMap({
                 .addTo(instance!);
           }
         });
-        setCounts({ platforms, entrances, equipment });
+        const edges = explicitEdges.length ? explicitEdges : platformCandidates;
+        if (edges.length === 1 && !edges[0].track) edges[0].track = '1';
+        edges.forEach((edge) => {
+          L.polyline(edge.geometry.map((point) => [point.lat, point.lon] as [number, number]), { color: '#00a6c7', weight: 5, opacity: .9 })
+            .bindTooltip(`Gleis ${escapeHtml(edge.track || 'ohne Nummer')}`).addTo(instance!);
+          const start = edge.geometry[0], end = edge.geometry.at(-1)!;
+          L.circleMarker([start.lat, start.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#20a464', fillOpacity: 1 }).addTo(instance!);
+          L.circleMarker([end.lat, end.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#d54532', fillOpacity: 1 }).addTo(instance!);
+        });
+        setCounts({ platforms: edges.length, entrances, equipment });
         setPlatformEdges(edges.sort((a, b) => a.track.localeCompare(b.track, 'de', { numeric: true })));
       } catch {
         if (!disposed) setCounts({ platforms: 0, entrances: 0, equipment: 0 });
