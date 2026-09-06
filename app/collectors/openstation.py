@@ -120,9 +120,14 @@ def select_station_identity_from_netex(
         score = similarity * 1000 - (distance or 0) / 4
         candidates.append((score, similarity, distance, identity))
     candidates.sort(key=lambda item: item[0], reverse=True)
-    if not candidates or candidates[0][1] < 0.65 or (candidates[0][2] is not None and candidates[0][2] > 1500):
+    if not candidates:
         raise LookupError("No matching NeTEx StopPlace found")
     best = candidates[0]
+    # Many StopPlaces omit coordinates. In that case fuzzy names such as
+    # Dorheim/Norheim must never be treated as an identity match.
+    minimum_similarity = 0.95 if best[2] is None else 0.65
+    if best[1] < minimum_similarity or (best[2] is not None and best[2] > 1500):
+        raise LookupError("No matching NeTEx StopPlace found")
     if len(candidates) > 1 and best[0] - candidates[1][0] < 35:
         raise ValueError("NeTEx station identity is ambiguous")
     return {**best[3], "name_similarity": round(best[1], 3),

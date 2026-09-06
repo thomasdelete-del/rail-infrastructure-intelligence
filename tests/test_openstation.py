@@ -1,4 +1,5 @@
 import asyncio
+import pytest
 
 from app.collectors.openstation import OpenStationCollector, extract_friedberg_stop_places, select_station_identity_from_netex
 
@@ -58,3 +59,9 @@ def test_resolves_generic_station_identifiers_from_netex():
     assert identity["ril"] == "FFG"
     assert identity["netex_id"] == "sp-hess"
     assert identity["identity_status"] == "identified"
+
+
+def test_rejects_similar_station_name_when_netex_coordinates_are_missing():
+    xml = b'<root><StopPlace id="norheim"><Name>Norheim</Name><PrivateCode>4584</PrivateCode></StopPlace></root>'
+    with pytest.raises(LookupError):
+        select_station_identity_from_netex(xml, "Dorheim", 50.35, 8.79)
