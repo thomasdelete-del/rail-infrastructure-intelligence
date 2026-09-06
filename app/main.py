@@ -21,6 +21,7 @@ from app.services.aerial_learning import store_training_sample
 from app.services.station_identity import netex_xml, prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_stada_identity, resolve_station_identity, search_netex_stations, stada_station_list
 from app.services.dynamic_station_sources import collect_db_station_sources
 from app.services.platform_data import load_platform_data
+from app.services.osm_platforms import load_osm_platforms
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
 app.add_middleware(
@@ -121,6 +122,11 @@ async def station_platform_data(name: str = Query(min_length=2, max_length=160),
         raise HTTPException(status_code=502, detail="Platform data sources are temporarily unavailable") from error
 
 
+@app.get("/stations/osm-platforms")
+async def station_osm_platforms(latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
+    return await load_osm_platforms(latitude, longitude)
+
+
 @app.get("/stations/infrastructure")
 async def station_infrastructure(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
     """Build the same NeTEx object catalogue for every identity-matched station."""
@@ -175,6 +181,18 @@ async def osm_change_report(persist: bool = False):
 async def osm_aerial_analysis(track: str = Query(min_length=1, max_length=4, pattern=r"^\d+[a-zA-Z]?$")):
     try:
         return await analyse_osm_platform(track)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="Luftbild- oder OSM-Quelle ist vorübergehend nicht erreichbar") from error
+
+
+@app.get("/stations/aerial-analysis/osm")
+async def station_aerial_analysis(name: str = Query(min_length=2, max_length=160), track: str = Query(min_length=1, max_length=20), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
+    try:
+        return await analyse_osm_platform(track, name, latitude, longitude)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:

@@ -95,6 +95,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .type-equipment { background: #7564a5; }
 @media (max-width: 800px) { .catalog-toolbar { align-items: stretch; flex-direction: column; } .catalog-search { width: 100%; } .catalog-body { grid-template-columns: 1fr; } .object-detail { padding: 22px 16px; } }
 .generic-endpoint-review { position: relative; right: auto; bottom: auto; width: max-content; max-width: calc(100% - 28px); margin: -132px 14px 60px auto; }
+.generic-aerial-apply { position: relative; z-index: 510; display: block; margin: -50px 28px 18px auto; border: 1px solid #0b6b8a; border-radius: 6px; background: #fff; padding: 7px 10px; color: #07577b; font-size: .75rem; font-weight: 750; cursor: pointer; }
 .germany-map { height: 390px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: #dce5e8; }
 .germany-map-status { display: flex; align-items: center; gap: 9px; padding: 12px 20px; color: #365767; font-size: .82rem; }
 .germany-map-status span { flex: 1; }

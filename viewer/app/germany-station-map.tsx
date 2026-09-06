@@ -61,6 +61,7 @@ type AuthoritativePlatform = {
 type InventoryObservation = { attribute: string; value: unknown; unit?: string | null; source_key: string; provenance?: Record<string, unknown> };
 type InventoryObject = { object_key: string; object_type: string; parent_object_key?: string | null; depth: number; observations: InventoryObservation[] };
 type StationInventory = { station: string; object_count: number; objects: InventoryObject[] };
+type GenericAerialAnalysis = { status: 'plausible' | 'check' | 'high' | 'insufficient_evidence'; confidence: number; candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; maximum_endpoint_shift_m?: number; start_shift_m?: number; end_shift_m?: number; reason?: string };
 const objectTypeLabels: Record<string, string> = { stop_place: 'Bahnhof', platform: 'Bahnsteig', platform_edge: 'Bahnsteigkante', entrance: 'Zugang', equipment: 'Ausstattung' };
 const inventoryAttributeLabels: Record<string, string> = { name: 'Bezeichnung', public_code: 'Gleis', quay_type: 'Bahnsteigtyp', mobility_impaired_access: 'Barrierefreiheit', wheelchair_access: 'Rollstuhlzugang', step_free_access: 'Stufenfreier Zugang', tactile_guidance_available: 'Taktiles Leitsystem', visual_signs_available: 'Visuelle Anzeigen', equipment_type: 'Ausstattungstyp', number_of_steps: 'Stufen', safe_for_guide_dog: 'Für Blindenführhund geeignet', latitude: 'Breitengrad', longitude: 'Längengrad', station_number: 'Stationsnummer', eva: 'EVA', ril: 'RIL 100' };
 
@@ -118,6 +119,8 @@ export function SelectedStationMap({
   const [reviewKey, setReviewKey] = useState<string | null>(null);
   const [endpointReviews, setEndpointReviews] = useState<Record<string, 'correct' | 'none' | 'corrected'>>({});
   const [osmConfirmed, setOsmConfirmed] = useState<Record<string, boolean>>({});
+  const [aerialResults, setAerialResults] = useState<Record<string, GenericAerialAnalysis>>({});
+  const [aerialChecksRunning, setAerialChecksRunning] = useState(false);
   const [correctionTarget, setCorrectionTarget] = useState<{ edgeId: string; endpoint: 'start' | 'end'; track: string } | null>(null);
   const authoritativeName = identity?.name || station.name;
   const displayName = /bahnhof$/i.test(authoritativeName.trim())
@@ -173,6 +176,8 @@ export function SelectedStationMap({
     setAuthoritativePlatforms([]);
     setInventory(null);
     setSelectedObjectKey(null);
+    setAerialResults({});
+    setAerialChecksRunning(false);
     const controller = new AbortController();
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
     void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
@@ -231,10 +236,8 @@ export function SelectedStationMap({
         )
         .openPopup();
       try {
-        const query = `[out:json][timeout:25];(nwr(around:1200,${station.latitude},${station.longitude})[railway~"^(station|halt)$"];nwr(around:900,${station.latitude},${station.longitude})[railway=platform];nwr(around:900,${station.latitude},${station.longitude})[railway=platform_edge];nwr(around:900,${station.latitude},${station.longitude})[public_transport=platform];nwr(around:900,${station.latitude},${station.longitude})[railway=subway_entrance];nwr(around:900,${station.latitude},${station.longitude})[entrance][railway];nwr(around:900,${station.latitude},${station.longitude})[highway=elevator];nwr(around:900,${station.latitude},${station.longitude})[elevator=yes];);out center geom;`;
-        const response = await fetch(
-          `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
-        );
+        const parameters = new URLSearchParams({ latitude: String(station.latitude), longitude: String(station.longitude) });
+        const response = await fetch(`${API}/stations/osm-platforms?${parameters}`, { cache: 'no-store' });
         if (!response.ok) throw new Error();
         const data = (await response.json()) as { elements: OsmElement[] };
         if (disposed) return;
@@ -293,7 +296,11 @@ export function SelectedStationMap({
                 .addTo(instance!);
           }
         });
-        const edges = explicitEdges.length ? explicitEdges : platformCandidates;
+        const edges = [...explicitEdges];
+        const explicitTracks = new Set(explicitEdges.map((edge) => edge.track).filter((track) => track && track !== 'ohne Nummer'));
+        platformCandidates.forEach((candidate) => {
+          if ((candidate.track && !explicitTracks.has(candidate.track)) || (!candidate.track && !explicitEdges.length)) edges.push(candidate);
+        });
         if (edges.length === 1 && !edges[0].track) {
           edges[0].track = '1';
           edges[0].trackSource = 'single_platform_fallback';
@@ -357,6 +364,7 @@ export function SelectedStationMap({
   ])), [platformEdges]);
   const reviewIndex = Math.max(0, reviewEndpoints.findIndex((item) => item.key === reviewKey));
   const currentReview = reviewKey ? reviewEndpoints[reviewIndex] : null;
+  const currentAerial = currentReview ? aerialResults[currentReview.edge.id] : undefined;
   const navigateReview = (direction: -1 | 1) => {
     if (!reviewEndpoints.length) return;
     const next = reviewEndpoints[(reviewIndex + direction + reviewEndpoints.length) % reviewEndpoints.length];
@@ -366,6 +374,19 @@ export function SelectedStationMap({
     if (!reviewEndpoints.length) return;
     const next = reviewEndpoints.find((item) => !endpointReviews[item.key]) ?? reviewEndpoints[0];
     focusEndpoint(next.edge, next.endpoint);
+    if (Object.keys(aerialResults).length || aerialChecksRunning) return;
+    setAerialChecksRunning(true);
+    void Promise.all(platformEdges.map(async (edge) => {
+      try {
+        const parameters = new URLSearchParams({ name: authoritativeName, track: edge.track, latitude: String(station.latitude), longitude: String(station.longitude) });
+        const response = await fetch(`${API}/stations/aerial-analysis/osm?${parameters}`, { cache: 'no-store' });
+        if (!response.ok) throw new Error();
+        const result = await response.json() as GenericAerialAnalysis;
+        setAerialResults((current) => ({ ...current, [edge.id]: result }));
+      } catch {
+        setAerialResults((current) => ({ ...current, [edge.id]: { status: 'insufficient_evidence', confidence: 0, reason: 'Keine eindeutige automatische Luftbildauswertung verfügbar' } }));
+      }
+    })).finally(() => setAerialChecksRunning(false));
   };
   const reviewedEndpointCount = reviewEndpoints.filter((item) => Boolean(endpointReviews[item.key])).length;
   const rateEndpoint = (status: 'correct' | 'none') => {
@@ -374,6 +395,13 @@ export function SelectedStationMap({
     const point = currentReview.endpoint === 'start' ? currentReview.edge.geometry[0] : currentReview.edge.geometry.at(-1)!;
     void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${station.id}:${currentReview.edge.track}`, endpoint: currentReview.endpoint, accepted: status === 'correct', features: {}, confirmed_coordinate: status === 'correct' ? { latitude: point.lat, longitude: point.lon } : null }) });
     if (status === 'none') setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track });
+  };
+  const applyAerialSuggestion = () => {
+    if (!currentReview || !currentAerial?.candidate_start || !currentAerial.candidate_end) return;
+    const start = { lat: currentAerial.candidate_start.latitude, lon: currentAerial.candidate_start.longitude };
+    const end = { lat: currentAerial.candidate_end.latitude, lon: currentAerial.candidate_end.longitude };
+    setPlatformEdges((current) => current.map((edge) => edge.id === currentReview.edge.id ? { ...edge, geometry: [start, end], length: geometryLength([start, end]) } : edge));
+    setEndpointReviews((current) => ({ ...current, [`${currentReview.edge.id}:start`]: 'corrected', [`${currentReview.edge.id}:end`]: 'corrected' }));
   };
   const sourceEntries = [
     { name: 'DB InfraGO StaDa', quality: 'A', active: dbSources.stada === 'active' },
@@ -427,7 +455,8 @@ export function SelectedStationMap({
         className="selected-station-map"
         aria-label={`Lageplan ${displayName}`}
       />
-      {currentReview ? <div className="endpoint-review-nav generic-endpoint-review"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>Gleis {currentReview.edge.track} · {currentReview.endpoint === 'start' ? 'Anfang' : 'Ende'}</strong><span>{correctionTarget ? 'Richtigen Abschluss in der Karte anklicken' : endpointReviews[currentReview.key] === 'correct' ? 'Abschluss bestätigt' : endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : endpointReviews[currentReview.key] === 'none' ? 'Kein Abschluss – Korrektur erwartet' : 'Noch nicht geprüft'}</span><div className="endpoint-learning-actions"><button type="button" className={endpointReviews[currentReview.key] === 'correct' ? 'learning-correct-active' : ''} onClick={() => rateEndpoint('correct')}>Abschluss korrekt</button><button type="button" className={endpointReviews[currentReview.key] === 'none' ? 'learning-wrong-active' : ''} onClick={() => rateEndpoint('none')}>Kein Abschluss</button><button type="button" className={endpointReviews[currentReview.key] === 'corrected' ? 'learning-corrected-active' : ''} onClick={() => setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track })}>{endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : 'Richtigen Abschluss setzen'}</button></div></div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
+      {currentReview ? <div className="endpoint-review-nav generic-endpoint-review"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>Gleis {currentReview.edge.track} · {currentReview.endpoint === 'start' ? 'Anfang' : 'Ende'}</strong><span>{correctionTarget ? 'Richtigen Abschluss in der Karte anklicken' : endpointReviews[currentReview.key] === 'correct' ? 'Abschluss bestätigt' : endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : endpointReviews[currentReview.key] === 'none' ? 'Kein Abschluss – Korrektur erwartet' : currentAerial?.status === 'plausible' ? `Luftbild plausibel · ${Math.round(currentAerial.confidence * 100)}%` : currentAerial?.maximum_endpoint_shift_m != null ? `Abweichung ${currentAerial.maximum_endpoint_shift_m.toFixed(1)} m · ${Math.round(currentAerial.confidence * 100)}%` : aerialChecksRunning ? 'Amtliches Luftbild wird ausgewertet …' : currentAerial?.reason ?? 'Noch nicht geprüft'}</span>{currentAerial?.candidate_length_m != null ? <small>Erkannte Länge: {currentAerial.candidate_length_m.toFixed(1)} m</small> : null}<div className="endpoint-learning-actions"><button type="button" className={endpointReviews[currentReview.key] === 'correct' ? 'learning-correct-active' : ''} onClick={() => rateEndpoint('correct')}>Abschluss korrekt</button><button type="button" className={endpointReviews[currentReview.key] === 'none' ? 'learning-wrong-active' : ''} onClick={() => rateEndpoint('none')}>Kein Abschluss</button><button type="button" className={endpointReviews[currentReview.key] === 'corrected' ? 'learning-corrected-active' : ''} onClick={() => setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track })}>{endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : 'Richtigen Abschluss setzen'}</button></div></div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
+      {currentReview && currentAerial?.candidate_start && currentAerial.candidate_end && currentAerial.status !== 'plausible' ? <button type="button" className="generic-aerial-apply" onClick={applyAerialSuggestion}>Luftbildvorschlag als beide Prüfpunkte übernehmen</button> : null}
       <div className="generic-map-controls" aria-label="Kartenebenen">
         <button type="button" className={imagery === 'satellite' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'satellite' ? 'none' : 'satellite')}><Satellite size={16}/>Satellit</button>
         {officialImageryAvailable ? <button type="button" className={imagery === 'official' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'official' ? 'none' : 'official')}><Layers3 size={16}/>Amtliches Luftbild</button> : null}
@@ -448,7 +477,7 @@ export function SelectedStationMap({
       </section>
       <div className="platform-check-panel generic-platform-check">
         <div><strong>Bahnsteigdaten und Plausibilitätscheck</strong><span>OSM-Baulänge wird wie in Friedberg gegen die DB-Nettobaulänge geprüft; Anfang und Ende bleiben unabhängig prüfbar.</span></div>
-        <div className="generic-check-actions"><div className="comparison-summary"><span className="comparison-low">{lengthComparisons.filter((item) => item.level === 'low').length} geringe</span><span className="comparison-check">{lengthComparisons.filter((item) => item.level === 'check').length} prüfen</span><span className="comparison-high">{lengthComparisons.filter((item) => item.level === 'high').length} auffällig</span></div><button type="button" className={reviewKey ? 'platform-check-switch platform-check-switch-on' : 'platform-check-switch'} onClick={startPlatformReview} disabled={!reviewEndpoints.length}><span aria-hidden="true"/>{reviewKey ? `Nächsten offenen Endpunkt prüfen (${reviewedEndpointCount}/${reviewEndpoints.length})` : 'Bahnsteigkanten prüfen'}</button></div>
+        <div className="generic-check-actions"><div className="comparison-summary"><span className="comparison-low">{lengthComparisons.filter((item) => item.level === 'low').length} geringe</span><span className="comparison-check">{lengthComparisons.filter((item) => item.level === 'check').length} prüfen</span><span className="comparison-high">{lengthComparisons.filter((item) => item.level === 'high').length} auffällig</span></div><button type="button" className={reviewKey ? 'platform-check-switch platform-check-switch-on' : 'platform-check-switch'} onClick={startPlatformReview} disabled={!reviewEndpoints.length}><span aria-hidden="true"/>{aerialChecksRunning ? `Luftbildprüfung läuft (${Object.keys(aerialResults).length}/${platformEdges.length})` : reviewKey ? `Nächsten offenen Endpunkt prüfen (${reviewedEndpointCount}/${reviewEndpoints.length})` : 'Bahnsteigkanten prüfen'}</button></div>
       </div>
       <div className="generic-platform-scroll">
         <table className="platform-data-table">

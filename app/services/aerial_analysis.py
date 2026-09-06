@@ -11,6 +11,7 @@ import numpy as np
 
 from app.collectors.osm import OpenStreetMapCollector, parse_osm_friedberg
 from app.services.aerial_learning import latest_correction, learned_probability
+from app.services.osm_platforms import load_osm_platforms
 
 
 WMS_URL = "https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows"
@@ -235,25 +236,32 @@ def analyse_platform_crop(
     }
 
 
-async def analyse_osm_platform(track: str) -> dict[str, Any]:
+async def analyse_osm_platform(track: str, station_name: str = "Friedberg (Hess)", latitude: float | None = None, longitude: float | None = None) -> dict[str, Any]:
     global _OSM_CACHE
-    async with _OSM_CACHE_LOCK:
-        if _OSM_CACHE is None or monotonic() - _OSM_CACHE[0] > 300:
-            _OSM_CACHE = (monotonic(), await OpenStreetMapCollector().fetch())
-        payload = _OSM_CACHE[1]
-    if not parse_osm_friedberg(payload):
-        raise ValueError("OSM-Datensatz besteht die Identitätsprüfung Friedberg (Hess) nicht")
+    generic_station = latitude is not None and longitude is not None
+    if generic_station:
+        payload = await load_osm_platforms(float(latitude), float(longitude))
+    else:
+        async with _OSM_CACHE_LOCK:
+            if _OSM_CACHE is None or monotonic() - _OSM_CACHE[0] > 300:
+                _OSM_CACHE = (monotonic(), await OpenStreetMapCollector().fetch())
+            payload = _OSM_CACHE[1]
+        if not parse_osm_friedberg(payload):
+            raise ValueError("OSM-Datensatz besteht die Identitätsprüfung Friedberg (Hess) nicht")
     candidates = [element for element in payload.get("elements", [])
-                  if element.get("tags", {}).get("railway") == "platform_edge"
+                  if element.get("tags", {}).get("railway") in {"platform", "platform_edge"}
                   and str(element.get("tags", {}).get("ref", "")).casefold() == track.casefold()
                   and len(element.get("geometry", [])) >= 2]
     if len(candidates) != 1:
         raise LookupError(f"Für Gleis {track} wurde keine eindeutige OSM-Bahnsteigkante gefunden")
     element = candidates[0]
     geometry = element["geometry"]
+    if element.get("tags", {}).get("railway") == "platform" and len(geometry) > 2:
+        geometry = max(((start, end) for index, start in enumerate(geometry) for end in geometry[index + 1:]), key=lambda pair: np.linalg.norm(np.array(_mercator(pair[0]["lat"], pair[0]["lon"])) - np.array(_mercator(pair[1]["lat"], pair[1]["lon"]))))
+        geometry = list(geometry)
     paired_tracks = {"1": "1a", "1a": "1", "2": "4", "4": "2", "5": "7", "7": "5",
                      "8": "10", "10": "8", "11": "12", "12": "11"}
-    paired_track = paired_tracks.get(track.casefold())
+    paired_track = paired_tracks.get(track.casefold()) if not generic_station else None
     paired_candidates = [candidate for candidate in payload.get("elements", [])
                          if candidate.get("tags", {}).get("railway") == "platform_edge"
                          and str(candidate.get("tags", {}).get("ref", "")).casefold() == paired_track
@@ -285,7 +293,8 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
             result[f"{endpoint}_learned_probability"] = probability
             result["training_sample_count"] = sample_count
     try:
-        corrections = {endpoint: latest_correction(track, endpoint) for endpoint in ("start", "end")}
+        learning_track = f"{station_name}:{track}" if generic_station else track
+        corrections = {endpoint: latest_correction(learning_track, endpoint) for endpoint in ("start", "end")}
     except RuntimeError:
         corrections = {"start": None, "end": None}
     original_points = {
@@ -309,7 +318,7 @@ async def analyse_osm_platform(track: str) -> dict[str, Any]:
             float(result["osm_chord_length_m"]),
         )
     result.update({
-        "station": "Friedberg (Hess)", "track": track,
+        "station": station_name, "track": track,
         "osm": {"type": element["type"], "id": element["id"], "url": f"https://www.openstreetmap.org/{element['type']}/{element['id']}"},
         "provenance": {"publisher": "Hessische Verwaltung für Bodenmanagement und Geoinformation",
                        "source": "Geodatenviewer Hessen DOP20", "wms_url": WMS_URL, "layer": WMS_LAYER,
