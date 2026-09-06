@@ -57,6 +57,10 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .generic-platform-row > div > div { display: flex; align-items: center; gap: 10px; }
 .generic-platform-row small { color: #687b86; }
 .generic-platform-row i { height: 4px; border-radius: 3px; background: #f5a623; }
+.generic-platform-row i.platform-overview-low { background: #20845a; }
+.generic-platform-row i.platform-overview-check { background: #d58a22; }
+.generic-platform-row i.platform-overview-high { background: #c23b30; }
+.generic-platform-row i.platform-overview-missing { background: #94a4ab; }
 .generic-endpoint-review { position: relative; right: auto; bottom: auto; width: max-content; max-width: calc(100% - 28px); margin: -132px 14px 60px auto; }
 .germany-map { height: 390px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: #dce5e8; }
 .germany-map-status { display: flex; align-items: center; gap: 9px; padding: 12px 20px; color: #365767; font-size: .82rem; }
