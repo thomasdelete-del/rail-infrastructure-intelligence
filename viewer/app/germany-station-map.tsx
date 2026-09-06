@@ -417,22 +417,49 @@ export function SelectedStationMap({
     focusEndpoint(next.edge, next.endpoint);
   };
   const startPlatformReview = () => {
-    if (!reviewEndpoints.length) return;
-    const next = reviewEndpoints.find((item) => !endpointReviews[item.key]) ?? reviewEndpoints[0];
-    focusEndpoint(next.edge, next.endpoint);
+    if (reviewEndpoints.length) {
+      const next = reviewEndpoints.find((item) => !endpointReviews[item.key]) ?? reviewEndpoints[0];
+      focusEndpoint(next.edge, next.endpoint);
+    }
     if (Object.keys(aerialResults).length || aerialChecksRunning) return;
+    const tracks = platformEdges.length ? platformEdges.map((edge) => edge.track) : authoritativePlatforms.map((platform) => platform.track);
+    if (!tracks.length) return;
     setAerialChecksRunning(true);
-    void Promise.all(platformEdges.map(async (edge) => {
+    void Promise.all(tracks.map(async (track) => {
       try {
-        const parameters = new URLSearchParams({ name: authoritativeName, track: edge.track, latitude: String(station.latitude), longitude: String(station.longitude) });
-        const response = await fetch(`${API}/stations/aerial-analysis/osm?${parameters}`, { cache: 'no-store' });
+        const isFriedbergPilot = identity?.stationNumber === '1930' || /^Friedberg \(Hess\)/i.test(authoritativeName);
+        const parameters = isFriedbergPilot
+          ? new URLSearchParams({ track })
+          : new URLSearchParams({ name: authoritativeName, track, latitude: String(station.latitude), longitude: String(station.longitude) });
+        const endpoint = isFriedbergPilot ? `${API}/stations/friedberg-hess/aerial-analysis/osm` : `${API}/stations/aerial-analysis/osm`;
+        const response = await fetch(`${endpoint}?${parameters}`, { cache: 'no-store' });
         if (!response.ok) throw new Error();
         const result = await response.json() as GenericAerialAnalysis;
-        setAerialResults((current) => ({ ...current, [edge.id]: result }));
+        const existingEdge = platformEdges.find((edge) => edge.track === track);
+        const fallbackEdge = !existingEdge && result.candidate_start && result.candidate_end ? {
+          id: `aerial-analysis-${track}`,
+          track,
+          trackSource: 'unknown' as const,
+          osmType: 'way' as const,
+          osmId: 0,
+          geometry: [{ lat: result.candidate_start.latitude, lon: result.candidate_start.longitude }, { lat: result.candidate_end.latitude, lon: result.candidate_end.longitude }],
+          length: result.candidate_length_m ?? distance({ lat: result.candidate_start.latitude, lon: result.candidate_start.longitude }, { lat: result.candidate_end.latitude, lon: result.candidate_end.longitude }),
+        } : null;
+        const edgeId = existingEdge?.id ?? fallbackEdge?.id;
+        if (fallbackEdge) setPlatformEdges((current) => current.some((edge) => edge.track === track) ? current : [...current, fallbackEdge].sort((a, b) => a.track.localeCompare(b.track, 'de', { numeric: true })));
+        if (edgeId) setAerialResults((current) => ({ ...current, [edgeId]: result }));
+        return fallbackEdge;
       } catch {
-        setAerialResults((current) => ({ ...current, [edge.id]: { status: 'insufficient_evidence', confidence: 0, reason: 'Keine eindeutige automatische Luftbildauswertung verfügbar' } }));
+        const existingEdge = platformEdges.find((edge) => edge.track === track);
+        if (existingEdge) setAerialResults((current) => ({ ...current, [existingEdge.id]: { status: 'insufficient_evidence', confidence: 0, reason: 'Keine eindeutige automatische Luftbildauswertung verfügbar' } }));
+        return null;
       }
-    })).finally(() => setAerialChecksRunning(false));
+    })).then((fallbackEdges) => {
+      if (!reviewEndpoints.length) {
+        const first = fallbackEdges.find((edge): edge is PlatformEdge => Boolean(edge));
+        if (first) focusEndpoint(first, 'start');
+      }
+    }).finally(() => setAerialChecksRunning(false));
   };
   const reviewedEndpointCount = reviewEndpoints.filter((item) => Boolean(endpointReviews[item.key])).length;
   const rateEndpoint = (status: 'correct' | 'none') => {
@@ -534,7 +561,7 @@ export function SelectedStationMap({
       </section>
       <div className="platform-check-panel generic-platform-check">
         <div><strong>Bahnsteigdaten und Plausibilitätscheck</strong><span>OSM-Baulänge wird wie in Friedberg gegen die DB-Nettobaulänge geprüft; Anfang und Ende bleiben unabhängig prüfbar.</span></div>
-        <div className="generic-check-actions"><div className="comparison-summary"><span className="comparison-low">{lengthComparisons.filter((item) => item.level === 'low').length} geringe</span><span className="comparison-check">{lengthComparisons.filter((item) => item.level === 'check').length} prüfen</span><span className="comparison-high">{lengthComparisons.filter((item) => item.level === 'high').length} auffällig</span></div><button type="button" className={reviewKey ? 'platform-check-switch platform-check-switch-on' : 'platform-check-switch'} onClick={startPlatformReview} disabled={!reviewEndpoints.length}><span aria-hidden="true"/>{aerialChecksRunning ? `Luftbildprüfung läuft (${Object.keys(aerialResults).length}/${platformEdges.length})` : reviewKey ? `Nächsten offenen Endpunkt prüfen (${reviewedEndpointCount}/${reviewEndpoints.length})` : 'Bahnsteigkanten prüfen'}</button></div>
+        <div className="generic-check-actions"><div className="comparison-summary"><span className="comparison-low">{lengthComparisons.filter((item) => item.level === 'low').length} geringe</span><span className="comparison-check">{lengthComparisons.filter((item) => item.level === 'check').length} prüfen</span><span className="comparison-high">{lengthComparisons.filter((item) => item.level === 'high').length} auffällig</span></div><button type="button" className={reviewKey ? 'platform-check-switch platform-check-switch-on' : 'platform-check-switch'} onClick={startPlatformReview} disabled={!platformRows.length}><span aria-hidden="true"/>{aerialChecksRunning ? `Luftbildprüfung läuft (${Object.keys(aerialResults).length}/${Math.max(platformEdges.length, authoritativePlatforms.length)})` : reviewKey ? `Nächsten offenen Endpunkt prüfen (${reviewedEndpointCount}/${reviewEndpoints.length})` : 'Bahnsteigkanten prüfen'}</button></div>
       </div>
       <div className="generic-platform-scroll">
         <table className="platform-data-table">
