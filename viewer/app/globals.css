@@ -44,6 +44,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .station-picker-results svg { grid-row: 1 / 3; color: #0b5278; }
 .station-picker-results span { font-size: .8rem; font-weight: 750; }
 .station-picker-results small { color: #647985; font-size: .67rem; }
+.station-picker-empty { padding: 12px; color: #647985; font-size: .78rem; }
 .germany-map { height: 390px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: #dce5e8; }
 .germany-map-status { display: flex; align-items: center; gap: 9px; padding: 12px 20px; color: #365767; font-size: .82rem; }
 .germany-map-status span { flex: 1; }

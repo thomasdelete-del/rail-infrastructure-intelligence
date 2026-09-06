@@ -18,7 +18,7 @@ from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBER
 from app.services.change_report import build_change_report
 from app.services.aerial_analysis import analyse_osm_platform
 from app.services.aerial_learning import store_training_sample
-from app.services.station_identity import prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_station_identity, search_netex_stations
+from app.services.station_identity import prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_stada_identity, resolve_station_identity, search_netex_stations, stada_station_list
 from app.services.dynamic_station_sources import collect_db_station_sources
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
@@ -77,9 +77,20 @@ async def search_netex(query: str = Query(min_length=1, max_length=100), limit: 
     except httpx.HTTPError as error:
         raise HTTPException(status_code=502, detail="NeTEx station list is temporarily unavailable") from error
 
+@app.get("/stations/stada-list")
+async def stations_stada_list():
+    try:
+        stations = await stada_station_list()
+        return {"source": "DB InfraGO StaDa", "stations": stations, "count": len(stations)}
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="StaDa station list is temporarily unavailable") from error
+
 @app.get("/stations/dynamic-sources")
 async def dynamic_sources(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
-    netex, osm = await asyncio.gather(
+    stada, netex, osm = await asyncio.gather(
+        resolve_stada_identity(name, latitude, longitude),
         resolve_netex_station_identity(name, latitude, longitude),
         resolve_station_identity(name, latitude, longitude),
         return_exceptions=True,
@@ -88,10 +99,12 @@ async def dynamic_sources(name: str = Query(min_length=2, max_length=160), latit
         netex if isinstance(netex, dict) else None,
         None,
         osm if isinstance(osm, dict) else None,
+        stada=stada if isinstance(stada, dict) else None,
     )
     db_sources = await collect_db_station_sources(identity.get("station_number"))
     return {"identity": identity, "sources": {
-        "netex": {"status": "active" if isinstance(netex, dict) else "not_found", "role": "primary"},
+        "stada": {"status": "active" if isinstance(stada, dict) else "not_found", "role": "primary"},
+        "netex": {"status": "active" if isinstance(netex, dict) else "not_found", "role": "infrastructure_enrichment"},
         "era_rinf": {"status": "available_for_enrichment", "role": "secondary_authority"},
         "openstreetmap": {"status": "active" if isinstance(osm, dict) else "not_found", "role": "geometry_only"},
         **db_sources,

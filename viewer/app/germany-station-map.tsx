@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Layers3, MapPin, Satellite, Search, TrainFront } from 'lucide-react';
 import type { Map as LeafletMap, LayerGroup, TileLayer } from 'leaflet';
 const API = 'https://rail-infrastructure-intelligence-production.up.railway.app';
@@ -10,6 +10,16 @@ export type Station = {
   longitude: number;
   available?: boolean;
 };
+type StaDaStation = {
+  station_number: number | string;
+  name: string;
+  eva?: string | null;
+  ril?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+};
+const normalizeSearch = (value: string) =>
+  value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('de');
 const escapeHtml = (value: string) =>
   value.replace(
     /[&<>"']/g,
@@ -336,11 +346,40 @@ export function GermanyStationMap({
     layer = useRef<LayerGroup | null>(null);
   const [query, setQuery] = useState(''),
     [stations, setStations] = useState(MAJOR),
+    [stadaStations, setStaDaStations] = useState<StaDaStation[]>([]),
     [searching, setSearching] = useState(false),
     [showResults, setShowResults] = useState(false),
     [message, setMessage] = useState(
       'Friedberg (Hess) ist vollständig verfügbar; weitere Bahnhöfe können gesucht werden.',
     );
+  const filteredStations = useMemo(() => {
+    const tokens = normalizeSearch(query).trim().split(/\s+/).filter(Boolean);
+    if (!tokens.length) return [];
+    return stadaStations
+      .filter((station) => {
+        const haystack = normalizeSearch(`${station.name} ${station.station_number} ${station.eva ?? ''} ${station.ril ?? ''}`);
+        return tokens.every((token) => haystack.includes(token));
+      })
+      .slice(0, 20);
+  }, [query, stadaStations]);
+  useEffect(() => {
+    const controller = new AbortController();
+    setSearching(true);
+    void fetch(`${API}/stations/stada-list`, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error();
+        return response.json() as Promise<{ stations: StaDaStation[] }>;
+      })
+      .then((data) => {
+        setStaDaStations(data.stations);
+        setMessage(`${data.stations.length.toLocaleString('de-DE')} DB-Stationen sind für die Sofortsuche geladen.`);
+      })
+      .catch((error: unknown) => {
+        if ((error as { name?: string }).name !== 'AbortError') setMessage('Die DB-Stationsliste konnte nicht geladen werden.');
+      })
+      .finally(() => setSearching(false));
+    return () => controller.abort();
+  }, []);
   useEffect(() => {
     if (!el.current || map.current) return;
     void import('leaflet').then((L) => {
@@ -392,43 +431,23 @@ export function GermanyStationMap({
       });
     });
   }, [onSelect, stations]);
-  const search = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!query.trim()) return;
-    setSearching(true);
-    try {
-      const r = await fetch(`${API}/stations/search-netex?query=${encodeURIComponent(query)}&limit=12`, { cache: 'no-store' });
-      if (!r.ok) throw new Error();
-      const d = (await r.json()) as { stations: Array<{ netex_id: string; name: string; latitude: number; longitude: number }> };
-      const found = d.stations
-        .map((x) => ({
-          id: `netex-${x.netex_id}`,
-          name: x.name,
-          latitude: Number(x.latitude),
-          longitude: Number(x.longitude),
-        }))
-        .filter(
-          (x) => Number.isFinite(x.latitude) && Number.isFinite(x.longitude),
-        );
-      if (!found.length) {
-        setMessage('Kein Bahnhof gefunden.');
-        return;
-      }
-      const first = found[0];
-      setStations(found);
-      setShowResults(true);
-      map.current?.setView([first.latitude, first.longitude], 16, {
-        animate: true,
-      });
-      onSelect(first);
-      setMessage(
-        `${first.name} wird in der Kartenansicht angezeigt. ${found.length > 1 ? 'Weitere Treffer sind ebenfalls markiert.' : ''}`,
-      );
-    } catch {
-      setMessage('DB-NeTEx-Stationsliste ist momentan nicht erreichbar.');
-    } finally {
-      setSearching(false);
+  const chooseStation = (candidate: StaDaStation) => {
+    const latitude = Number(candidate.latitude), longitude = Number(candidate.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      setMessage(`${candidate.name} hat in StaDa keine Kartenkoordinaten.`);
+      return;
     }
+    const station: Station = { id: `stada-${candidate.station_number}`, name: candidate.name, latitude, longitude };
+    setStations([station]);
+    setShowResults(false);
+    map.current?.setView([latitude, longitude], 16, { animate: true });
+    onSelect(station);
+    setMessage(`${candidate.name} wird in der Kartenansicht angezeigt.`);
+  };
+  const search = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (filteredStations[0]) chooseStation(filteredStations[0]);
+    else if (query.trim()) setMessage('Kein DB-Bahnhof gefunden.');
   };
   return (
     <section className="germany-map-card">
@@ -436,15 +455,15 @@ export function GermanyStationMap({
         <div>
           <p className="map-kicker">BAHNHOF AUSWÄHLEN</p>
           <h2>Deutschlandweite Bahnhofssuche</h2>
-          <p>Ort oder Bahnhof eingeben und einen Marker wählen.</p>
+          <p>DB-Bahnhof eingeben; die StaDa-Liste wird mit jedem Buchstaben eingegrenzt.</p>
         </div>
         <div className="station-picker">
           <form onSubmit={search}>
             <Search size={17} />
-            <input value={query} onChange={(e) => { setQuery(e.target.value); if (!e.target.value) setShowResults(false); }} placeholder="DB-Bahnhof suchen, z. B. Kassel" />
-            <button disabled={searching}>{searching ? 'Suche …' : 'Suchen'}</button>
+            <input value={query} onFocus={() => setShowResults(Boolean(query.trim()))} onChange={(e) => { setQuery(e.target.value); setShowResults(Boolean(e.target.value.trim())); }} placeholder="DB-Bahnhof suchen, z. B. Kassel" autoComplete="off" />
+            <button disabled={searching || !filteredStations.length}>{searching ? 'Lade …' : 'Auswählen'}</button>
           </form>
-          {showResults ? <div className="station-picker-results" role="listbox" aria-label="DB-Stationsliste">{stations.map((station) => <button type="button" role="option" key={station.id} onClick={() => { onSelect(station); map.current?.setView([station.latitude, station.longitude], 16); setShowResults(false); }}><TrainFront size={15}/><span>{station.name}</span><small>DB InfraGO NeTEx</small></button>)}</div> : null}
+          {showResults ? <div className="station-picker-results" role="listbox" aria-label="DB-Stationsliste">{filteredStations.length ? filteredStations.map((station) => <button type="button" role="option" key={station.station_number} onClick={() => chooseStation(station)}><TrainFront size={15}/><span>{station.name}</span><small>StaDa {station.station_number}{station.ril ? ` · ${station.ril}` : ''}</small></button>) : <div className="station-picker-empty">Kein DB-Bahnhof gefunden</div>}</div> : null}
         </div>
       </div>
       <div ref={el} className="germany-map" />

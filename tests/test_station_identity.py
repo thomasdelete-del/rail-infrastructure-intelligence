@@ -2,7 +2,7 @@ import asyncio
 import pytest
 
 from app.services import station_identity
-from app.services.station_identity import prioritize_station_identity, select_station_identity
+from app.services.station_identity import normalize_stada_station, prioritize_station_identity, select_station_identity
 
 
 def station(osm_id, name, lat, lon, **tags):
@@ -36,6 +36,25 @@ def test_netex_identity_has_priority_and_osm_cannot_overwrite_it():
     assert result["ril"] == "FDHM"
     assert result["identity_source"] == "netex"
     assert result["osm_id"] == 1
+
+
+def test_stada_identity_has_priority_over_netex():
+    result = prioritize_station_identity(
+        {"name": "Friedberg NeTEx", "station_number": 1}, None, None,
+        stada={"name": "Friedberg (Hess)", "station_number": 1930, "eva": "8000111"},
+    )
+    assert result["matched_name"] == "Friedberg (Hess)"
+    assert result["station_number"] == 1930
+    assert result["identity_source"] == "stada"
+
+
+def test_normalizes_stada_station_for_picker():
+    result = normalize_stada_station({
+        "number": 1930, "name": "Friedberg (Hess)",
+        "evaNumbers": [{"number": 8000111, "isMain": True, "geographicCoordinates": {"coordinates": [8.761, 50.332]}}],
+        "ril100Identifiers": [{"rilIdentifier": "FFG", "isMain": True}],
+    })
+    assert result == {"station_number": 1930, "name": "Friedberg (Hess)", "eva": 8000111, "ril": "FFG", "longitude": 8.761, "latitude": 50.332}
 
 
 def test_searches_db_netex_station_list(monkeypatch):
