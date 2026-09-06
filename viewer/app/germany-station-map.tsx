@@ -61,7 +61,8 @@ type AuthoritativePlatform = {
 type InventoryObservation = { attribute: string; value: unknown; unit?: string | null; source_key: string; provenance?: Record<string, unknown> };
 type InventoryObject = { object_key: string; object_type: string; parent_object_key?: string | null; depth: number; observations: InventoryObservation[] };
 type StationInventory = { station: string; object_count: number; objects: InventoryObject[] };
-type GenericAerialAnalysis = { status: 'plausible' | 'check' | 'high' | 'insufficient_evidence'; confidence: number; candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; maximum_endpoint_shift_m?: number; start_shift_m?: number; end_shift_m?: number; reason?: string };
+type AerialFeatures = Record<string, number | boolean>;
+type GenericAerialAnalysis = { status: 'plausible' | 'check' | 'high' | 'insufficient_evidence'; confidence: number; candidate_start?: { latitude: number; longitude: number }; candidate_end?: { latitude: number; longitude: number }; candidate_length_m?: number; maximum_endpoint_shift_m?: number; start_shift_m?: number; end_shift_m?: number; start_features?: AerialFeatures; end_features?: AerialFeatures; start_learned_probability?: number | null; end_learned_probability?: number | null; training_sample_count?: number; reason?: string };
 const objectTypeLabels: Record<string, string> = { stop_place: 'Bahnhof', platform: 'Bahnsteig', platform_edge: 'Bahnsteigkante', entrance: 'Zugang', equipment: 'Ausstattung' };
 const inventoryAttributeLabels: Record<string, string> = { name: 'Bezeichnung', public_code: 'Gleis', quay_type: 'Bahnsteigtyp', mobility_impaired_access: 'Barrierefreiheit', wheelchair_access: 'Rollstuhlzugang', step_free_access: 'Stufenfreier Zugang', tactile_guidance_available: 'Taktiles Leitsystem', visual_signs_available: 'Visuelle Anzeigen', equipment_type: 'Ausstattungstyp', number_of_steps: 'Stufen', safe_for_guide_dog: 'Für Blindenführhund geeignet', latitude: 'Breitengrad', longitude: 'Längengrad', station_number: 'Stationsnummer', eva: 'EVA', ril: 'RIL 100' };
 
@@ -93,6 +94,7 @@ export function SelectedStationMap({
 }) {
   const el = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
+  const reviewLayerRef = useRef<LayerGroup | null>(null);
   const satelliteRef = useRef<TileLayer | null>(null);
   const officialRef = useRef<TileLayer | null>(null);
   const [counts, setCounts] = useState({
@@ -165,12 +167,14 @@ export function SelectedStationMap({
       }));
       const key = `${correctionTarget.edgeId}:${correctionTarget.endpoint}`;
       setEndpointReviews((current) => ({ ...current, [key]: 'corrected' }));
-      void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${station.id}:${correctionTarget.track}`, endpoint: correctionTarget.endpoint, accepted: false, features: {}, corrected_coordinate: { latitude: coordinate.lat, longitude: coordinate.lon } }) });
+      const analysis = aerialResults[correctionTarget.edgeId];
+      const features = correctionTarget.endpoint === 'start' ? analysis?.start_features : analysis?.end_features;
+      void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${authoritativeName}:${correctionTarget.track}`, endpoint: correctionTarget.endpoint, accepted: false, features: features ?? {}, corrected_coordinate: { latitude: coordinate.lat, longitude: coordinate.lon } }) });
       setCorrectionTarget(null);
     };
     map.once('click', handleClick);
     return () => { map.off('click', handleClick); };
-  }, [correctionTarget, station.id]);
+  }, [aerialResults, authoritativeName, correctionTarget]);
   useEffect(() => {
     setIdentity(null);
     setDbSources({});
@@ -217,6 +221,7 @@ export function SelectedStationMap({
         attribution: '&copy; OpenStreetMap-Mitwirkende',
       }).addTo(instance);
       mapRef.current = instance;
+      reviewLayerRef.current = L.layerGroup().addTo(instance);
       satelliteRef.current = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         maxNativeZoom: 19, maxZoom: 24, opacity: 0,
         attribution: 'Satellitenbild &copy; Esri, Maxar, Earthstar Geographics und weitere',
@@ -327,6 +332,7 @@ export function SelectedStationMap({
       disposed = true;
       instance?.remove();
       mapRef.current = null;
+      reviewLayerRef.current = null;
       satelliteRef.current = null;
       officialRef.current = null;
     };
@@ -368,6 +374,41 @@ export function SelectedStationMap({
   const reviewIndex = Math.max(0, reviewEndpoints.findIndex((item) => item.key === reviewKey));
   const currentReview = reviewKey ? reviewEndpoints[reviewIndex] : null;
   const currentAerial = currentReview ? aerialResults[currentReview.edge.id] : undefined;
+  useEffect(() => {
+    const layer = reviewLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+    if (!currentReview) return;
+    let disposed = false;
+    void import('leaflet').then((L) => {
+      if (disposed || !reviewLayerRef.current) return;
+      const target = reviewLayerRef.current;
+      const geometry = currentReview.edge.geometry;
+      if (geometry.length >= 2) {
+        L.polyline(geometry.map((point) => [point.lat, point.lon] as [number, number]), { color: '#f5a623', weight: 7, opacity: .95 })
+          .bindTooltip(`Geprüfte Bahnsteigkante · Gleis ${escapeHtml(currentReview.edge.track)}`)
+          .addTo(target);
+        const start = geometry[0], end = geometry.at(-1)!;
+        L.circleMarker([start.lat, start.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#20a464', fillOpacity: 1 }).bindTooltip('Geprüfter Anfang').addTo(target);
+        L.circleMarker([end.lat, end.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#d54532', fillOpacity: 1 }).bindTooltip('Geprüftes Ende').addTo(target);
+      }
+      if (!currentAerial?.candidate_start || !currentAerial.candidate_end) return;
+      const candidateStart = [currentAerial.candidate_start.latitude, currentAerial.candidate_start.longitude] as [number, number];
+      const candidateEnd = [currentAerial.candidate_end.latitude, currentAerial.candidate_end.longitude] as [number, number];
+      L.polyline([candidateStart, candidateEnd], { color: '#00c7df', weight: 5, opacity: .95, dashArray: '10 7' })
+        .bindTooltip(`Luftbild-Erkennung${currentAerial.candidate_length_m != null ? ` · ${currentAerial.candidate_length_m.toFixed(1)} m` : ''}`)
+        .addTo(target);
+      L.circleMarker(candidateStart, { radius: 9, color: '#063b55', weight: 3, fillColor: '#00d4e8', fillOpacity: 1 }).bindTooltip('Erkannter Anfang im Luftbild').addTo(target);
+      L.circleMarker(candidateEnd, { radius: 9, color: '#063b55', weight: 3, fillColor: '#00d4e8', fillOpacity: 1 }).bindTooltip('Erkanntes Ende im Luftbild').addTo(target);
+      const currentPoint = currentReview.endpoint === 'start' ? geometry[0] : geometry.at(-1);
+      const candidatePoint = currentReview.endpoint === 'start' ? candidateStart : candidateEnd;
+      const shift = currentReview.endpoint === 'start' ? currentAerial.start_shift_m : currentAerial.end_shift_m;
+      if (currentPoint) L.polyline([[currentPoint.lat, currentPoint.lon], candidatePoint], { color: shift != null && shift <= 2 ? '#20845a' : '#d54532', weight: 3, opacity: .9, dashArray: '4 5' })
+        .bindTooltip(shift != null && shift <= 2 ? 'OSM im Luftbild bestätigt' : `Abweichung${shift != null ? ` ${shift.toFixed(1)} m` : ''}`)
+        .addTo(target);
+    });
+    return () => { disposed = true; layer.clearLayers(); };
+  }, [currentAerial, currentReview]);
   const navigateReview = (direction: -1 | 1) => {
     if (!reviewEndpoints.length) return;
     const next = reviewEndpoints[(reviewIndex + direction + reviewEndpoints.length) % reviewEndpoints.length];
@@ -396,7 +437,8 @@ export function SelectedStationMap({
     if (!currentReview) return;
     setEndpointReviews((current) => ({ ...current, [currentReview.key]: status }));
     const point = currentReview.endpoint === 'start' ? currentReview.edge.geometry[0] : currentReview.edge.geometry.at(-1)!;
-    void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${station.id}:${currentReview.edge.track}`, endpoint: currentReview.endpoint, accepted: status === 'correct', features: {}, confirmed_coordinate: status === 'correct' ? { latitude: point.lat, longitude: point.lon } : null }) });
+    const features = currentReview.endpoint === 'start' ? currentAerial?.start_features : currentAerial?.end_features;
+    void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${authoritativeName}:${currentReview.edge.track}`, endpoint: currentReview.endpoint, accepted: status === 'correct', features: features ?? {}, confirmed_coordinate: status === 'correct' ? { latitude: point.lat, longitude: point.lon } : null }) });
     if (status === 'none') setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track });
   };
   const applyAerialSuggestion = () => {
@@ -405,6 +447,12 @@ export function SelectedStationMap({
     const end = { lat: currentAerial.candidate_end.latitude, lon: currentAerial.candidate_end.longitude };
     setPlatformEdges((current) => current.map((edge) => edge.id === currentReview.edge.id ? { ...edge, geometry: [start, end], length: geometryLength([start, end]) } : edge));
     setEndpointReviews((current) => ({ ...current, [`${currentReview.edge.id}:start`]: 'corrected', [`${currentReview.edge.id}:end`]: 'corrected' }));
+    const trainingTrack = `${authoritativeName}:${currentReview.edge.track}`;
+    void Promise.all((['start', 'end'] as const).map((endpoint) => {
+      const coordinate = endpoint === 'start' ? currentAerial.candidate_start! : currentAerial.candidate_end!;
+      const features = endpoint === 'start' ? currentAerial.start_features : currentAerial.end_features;
+      return fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: trainingTrack, endpoint, accepted: false, features: features ?? {}, corrected_coordinate: coordinate }) });
+    }));
   };
   const sourceEntries = [
     { name: 'DB InfraGO StaDa', quality: 'A', state: dbSources.stada === 'active' ? 'active' : 'unavailable' },
