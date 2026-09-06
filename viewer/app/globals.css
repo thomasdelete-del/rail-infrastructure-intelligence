@@ -203,11 +203,13 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .platform-check-result-plausible { box-shadow: inset 0 3px #20845a; }
 .platform-check-result-check { box-shadow: inset 0 3px #d58a22; }
 .platform-check-result-high { box-shadow: inset 0 3px #c23b30; }
-.platform-result-track { width: fit-content; border: 0; background: transparent; padding: 0; color: #0b5278; font-size: .92rem; font-weight: 800; cursor: pointer; }
+.platform-result-track { width: fit-content; color: #0b5278; font-size: .92rem; font-weight: 800; }
 .platform-result-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: auto; padding-top: 6px; }
 .platform-result-actions button { border: 1px solid #b7c5cb; border-radius: 4px; background: #fff; padding: 4px 6px; color: #274653; font-size: .68rem; font-weight: 700; cursor: pointer; }
 .endpoint-result-jump { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 1px solid #d2dde1; border-radius: 5px; background: #f8fbfc; padding: 6px 7px; color: #435b66; cursor: pointer; text-align: left; }
 .endpoint-result-jump:hover, .endpoint-result-jump:focus-visible { border-color: #0b5278; background: #edf7fb; outline: none; }
+.endpoint-result-static { cursor: default; }
+.endpoint-result-static:hover { border-color: #d2dde1; background: #f8fbfc; }
 .endpoint-result-jump span { font-size: .72rem; }
 .endpoint-result-jump span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .endpoint-result-jump span b { font-size: .72rem; }

@@ -357,15 +357,19 @@ function PlatformDataTable({ reference, inventory, coordinateDrafts, aerialResul
           const assessment = Math.abs(shift) <= 3 ? 'OSM bestätigt' : `${shift >= 0 ? '+' : ''}${shift.toFixed(1)} m`;
           return `${assessment} · ${Math.round((confidence ?? result.confidence) * 100)}%`;
         };
+        const endpointCard = (coordinateType: 'start' | 'end', label: string) => {
+          const shift = coordinateType === 'start' ? result?.start_shift_m : result?.end_shift_m;
+          const requiresAerialReview = shift !== undefined && Math.abs(shift) > 2;
+          const content = <><span><b>{label}</b>{requiresAerialReview ? <small>Im Luftbild prüfen</small> : null}</span><strong>{endpointStatus(coordinateType)}</strong></>;
+          return requiresAerialReview
+            ? <button type="button" className="endpoint-result-jump" onClick={() => onAerialReview(edge.object_id, result, coordinateType)}>{content}</button>
+            : <div className="endpoint-result-jump endpoint-result-static">{content}</div>;
+        };
         return <article key={edge.track} className={`platform-check-result ${result ? `platform-check-result-${result.status}` : ''}`}>
-          <button type="button" className="platform-result-track" onClick={() => onAerialReview(edge.object_id, result, 'start')}>Gleis {edge.track}</button>
+          <strong className="platform-result-track">Gleis {edge.track}</strong>
           {loading ? <strong>Anfang und Ende werden unabhängig geprüft</strong> : <>
-            <button type="button" className="endpoint-result-jump" onClick={() => onAerialReview(edge.object_id, result, 'start')}>
-              <span><b>Anfang</b><small>Im Luftbild prüfen</small></span><strong>{endpointStatus('start')}</strong>
-            </button>
-            <button type="button" className="endpoint-result-jump" onClick={() => onAerialReview(edge.object_id, result, 'end')}>
-              <span><b>Ende</b><small>Im Luftbild prüfen</small></span><strong>{endpointStatus('end')}</strong>
-            </button>
+            {endpointCard('start', 'Anfang')}
+            {endpointCard('end', 'Ende')}
           </>}
         </article>;
       })}

@@ -1,6 +1,6 @@
 import asyncio
 
-from app.collectors.openstation import OpenStationCollector, extract_friedberg_stop_places
+from app.collectors.openstation import OpenStationCollector, extract_friedberg_stop_places, select_station_identity_from_netex
 
 XML = b'''<PublicationDelivery xmlns="http://www.netex.org.uk/netex"><StopPlace id="sp-hess">
 <keyList><KeyValue><Key>EVA</Key><Value>8000111</Value></KeyValue><KeyValue><Key>RIL</Key><Value>FFG</Value></KeyValue></keyList>
@@ -49,3 +49,12 @@ def test_ambiguous_or_wrong_friedberg_is_rejected():
     assert extract_friedberg_stop_places(ambiguous) == []
     assert extract_friedberg_stop_places(bavaria) == []
     assert extract_friedberg_stop_places(wrong_eva) == []
+
+
+def test_resolves_generic_station_identifiers_from_netex():
+    identity = select_station_identity_from_netex(XML, "Friedberg Hess", 50.3301, 8.7501)
+    assert identity["station_number"] == 1930
+    assert identity["eva"] == "8000111"
+    assert identity["ril"] == "FFG"
+    assert identity["netex_id"] == "sp-hess"
+    assert identity["identity_status"] == "identified"

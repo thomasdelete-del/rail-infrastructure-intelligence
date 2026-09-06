@@ -1,5 +1,7 @@
 import re
+from difflib import SequenceMatcher
 from io import BytesIO
+from math import asin, cos, radians, sin, sqrt
 from typing import Any
 from xml.etree.ElementTree import Element, iterparse
 
@@ -70,6 +72,61 @@ def coordinates(element: Element) -> tuple[float | None, float | None]:
     latitude = nested_text(element, ("Centroid", "Location", "Latitude"))
     longitude = nested_text(element, ("Centroid", "Location", "Longitude"))
     return (float(latitude) if latitude else None, float(longitude) if longitude else None)
+
+
+def station_identity(stop_place: Element) -> dict[str, Any] | None:
+    """Extract stable station identifiers from one NeTEx StopPlace."""
+    netex_id = stop_place.attrib.get("id")
+    name = direct_text(stop_place, "Name")
+    if not netex_id or not name:
+        return None
+    keys = {key.upper(): value for key, value in key_values(stop_place).items()}
+    private_code = direct_text(stop_place, "PrivateCode")
+    station_number = int(private_code) if private_code and private_code.isdigit() else None
+    latitude, longitude = coordinates(stop_place)
+    return {
+        "name": name, "netex_id": netex_id, "dhid": netex_id.removeprefix("dhid:"),
+        "station_number": station_number, "eva": keys.get("EVA"), "ril": keys.get("RIL"),
+        "latitude": latitude, "longitude": longitude,
+        "identity_status": "identified" if any((station_number, keys.get("EVA"), keys.get("RIL"))) else "netex_only",
+    }
+
+
+def extract_station_identities(xml: bytes) -> list[dict[str, Any]]:
+    identities = []
+    for _, element in iterparse(BytesIO(xml), events=("end",)):
+        if local_name(element.tag) == "StopPlace":
+            identity = station_identity(element)
+            if identity:
+                identities.append(identity)
+            element.clear()
+    return identities
+
+
+def select_station_identity_from_netex(
+    xml: bytes, name: str, latitude: float | None = None, longitude: float | None = None,
+) -> dict[str, Any]:
+    """Select one station deterministically by name and optional proximity."""
+    normalized = " ".join(name.casefold().replace("bahnhof", " ").replace("hbf", " ").split())
+    candidates = []
+    for identity in extract_station_identities(xml):
+        candidate_name = " ".join(identity["name"].casefold().replace("bahnhof", " ").replace("hbf", " ").split())
+        similarity = SequenceMatcher(None, normalized, candidate_name).ratio()
+        distance = None
+        if latitude is not None and longitude is not None and identity["latitude"] is not None and identity["longitude"] is not None:
+            lat1, lon1, lat2, lon2 = map(radians, (latitude, longitude, identity["latitude"], identity["longitude"]))
+            value = sin((lat2 - lat1) / 2) ** 2 + cos(lat1) * cos(lat2) * sin((lon2 - lon1) / 2) ** 2
+            distance = 6371000 * 2 * asin(sqrt(value))
+        score = similarity * 1000 - (distance or 0) / 4
+        candidates.append((score, similarity, distance, identity))
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    if not candidates or candidates[0][1] < 0.65 or (candidates[0][2] is not None and candidates[0][2] > 1500):
+        raise LookupError("No matching NeTEx StopPlace found")
+    best = candidates[0]
+    if len(candidates) > 1 and best[0] - candidates[1][0] < 35:
+        raise ValueError("NeTEx station identity is ambiguous")
+    return {**best[3], "name_similarity": round(best[1], 3),
+            "distance_m": round(best[2], 1) if best[2] is not None else None}
 
 
 def accessibility(element: Element) -> dict[str, Any]:

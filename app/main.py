@@ -3,7 +3,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from app.collectors.openstation import OpenStationCollector
+from app.collectors.openstation import OpenStationCollector, select_station_identity_from_netex
 from app.collectors.osm import OpenStreetMapCollector
 from app.collectors.stada import StaDaCollector
 from app.collectors.fasta import FaStaCollector
@@ -52,6 +52,20 @@ async def resolve_identity(name: str = Query(min_length=2, max_length=160), lati
         raise HTTPException(status_code=409, detail=str(error)) from error
     except httpx.HTTPError as error:
         raise HTTPException(status_code=502, detail="OSM identity service is temporarily unavailable") from error
+
+@app.get("/stations/resolve-netex-identity")
+async def resolve_netex_identity(name: str = Query(min_length=2, max_length=160), latitude: float | None = Query(default=None, ge=47, le=56), longitude: float | None = Query(default=None, ge=5, le=16)):
+    if (latitude is None) != (longitude is None):
+        raise HTTPException(status_code=422, detail="latitude and longitude must be supplied together")
+    try:
+        xml = await OpenStationCollector().fetch_netex()
+        return select_station_identity_from_netex(xml, name, latitude, longitude)
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="NeTEx identity service is temporarily unavailable") from error
 
 @app.get("/stations/dynamic-sources")
 async def dynamic_sources(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
