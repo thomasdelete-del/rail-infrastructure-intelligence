@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { MapPin, Search, TrainFront } from 'lucide-react';
-import type { Map as LeafletMap, LayerGroup } from 'leaflet';
+import { Layers3, MapPin, Satellite, Search, TrainFront } from 'lucide-react';
+import type { Map as LeafletMap, LayerGroup, TileLayer } from 'leaflet';
 const API = 'https://rail-infrastructure-intelligence-production.up.railway.app';
 export type Station = {
   id: string;
@@ -28,6 +28,24 @@ type OsmElement = {
   geometry?: Array<{ lat: number; lon: number }>;
   tags?: Record<string, string>;
 };
+type PlatformEdge = {
+  id: string;
+  track: string;
+  geometry: Array<{ lat: number; lon: number }>;
+  length: number;
+  height?: string;
+};
+
+const distance = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
+  const radians = (value: number) => value * Math.PI / 180;
+  const lat1 = radians(a.lat), lat2 = radians(b.lat);
+  const dLat = lat2 - lat1, dLon = radians(b.lon - a.lon);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+};
+
+const geometryLength = (geometry: Array<{ lat: number; lon: number }>) =>
+  geometry.slice(1).reduce((sum, point, index) => sum + distance(geometry[index], point), 0);
 export function SelectedStationMap({
   station,
   onBack,
@@ -36,6 +54,9 @@ export function SelectedStationMap({
   onBack: () => void;
 }) {
   const el = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const satelliteRef = useRef<TileLayer | null>(null);
+  const officialRef = useRef<TileLayer | null>(null);
   const [counts, setCounts] = useState({
     platforms: 0,
     entrances: 0,
@@ -49,10 +70,18 @@ export function SelectedStationMap({
     osm?: string;
   } | null>(null);
   const [dbSources, setDbSources] = useState<{ stada?: string; fasta?: string; facilities?: number }>({});
+  const [platformEdges, setPlatformEdges] = useState<PlatformEdge[]>([]);
+  const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [loading, setLoading] = useState(true);
   const displayName = /bahnhof$/i.test(station.name.trim())
     ? station.name
     : `${station.name} Bahnhof`;
+  const officialImageryAvailable = station.latitude >= 49.39 && station.latitude <= 51.66 && station.longitude >= 7.77 && station.longitude <= 10.24;
+  const focusEndpoint = (edge: PlatformEdge, endpoint: 'start' | 'end') => {
+    const point = endpoint === 'start' ? edge.geometry[0] : edge.geometry.at(-1);
+    setImagery(officialImageryAvailable ? 'official' : 'satellite');
+    if (point) mapRef.current?.setView([point.lat, point.lon], 21, { animate: false });
+  };
   useEffect(() => {
     const controller = new AbortController();
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
@@ -68,13 +97,23 @@ export function SelectedStationMap({
     let instance: LeafletMap | null = null;
     void import('leaflet').then(async (L) => {
       if (disposed || !el.current) return;
-      instance = L.map(el.current, { minZoom: 5, maxZoom: 20 }).setView(
+      instance = L.map(el.current, { minZoom: 5, maxZoom: 24 }).setView(
         [station.latitude, station.longitude],
         17,
       );
       L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 20,
+        maxNativeZoom: 19,
+        maxZoom: 24,
         attribution: '&copy; OpenStreetMap-Mitwirkende',
+      }).addTo(instance);
+      mapRef.current = instance;
+      satelliteRef.current = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxNativeZoom: 19, maxZoom: 24, opacity: 0,
+        attribution: 'Satellitenbild &copy; Esri, Maxar, Earthstar Geographics und weitere',
+      }).addTo(instance);
+      if (officialImageryAvailable) officialRef.current = L.tileLayer.wms('https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows', {
+        layers: 'he_dop20_rgb', format: 'image/png', transparent: true, version: '1.1.1', maxZoom: 24, opacity: 0,
+        attribution: 'Luftbild: &copy; Hessische Verwaltung für Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
       }).addTo(instance);
       L.circleMarker([station.latitude, station.longitude], {
         radius: 10,
@@ -89,7 +128,7 @@ export function SelectedStationMap({
         )
         .openPopup();
       try {
-        const query = `[out:json][timeout:25];(nwr(around:1200,${station.latitude},${station.longitude})[railway~"^(station|halt)$"];nwr(around:900,${station.latitude},${station.longitude})[railway=platform];nwr(around:900,${station.latitude},${station.longitude})[public_transport=platform];nwr(around:900,${station.latitude},${station.longitude})[railway=subway_entrance];nwr(around:900,${station.latitude},${station.longitude})[entrance][railway];nwr(around:900,${station.latitude},${station.longitude})[highway=elevator];nwr(around:900,${station.latitude},${station.longitude})[elevator=yes];);out center geom;`;
+        const query = `[out:json][timeout:25];(nwr(around:1200,${station.latitude},${station.longitude})[railway~"^(station|halt)$"];nwr(around:900,${station.latitude},${station.longitude})[railway=platform];nwr(around:900,${station.latitude},${station.longitude})[railway=platform_edge];nwr(around:900,${station.latitude},${station.longitude})[public_transport=platform];nwr(around:900,${station.latitude},${station.longitude})[railway=subway_entrance];nwr(around:900,${station.latitude},${station.longitude})[entrance][railway];nwr(around:900,${station.latitude},${station.longitude})[highway=elevator];nwr(around:900,${station.latitude},${station.longitude})[elevator=yes];);out center geom;`;
         const response = await fetch(
           `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`,
         );
@@ -99,6 +138,7 @@ export function SelectedStationMap({
         let platforms = 0,
           entrances = 0,
           equipment = 0;
+        const edges: PlatformEdge[] = [];
         const seen = new Set<string>();
         data.elements.forEach((item) => {
           const key = `${item.type}-${item.id}`;
@@ -106,7 +146,8 @@ export function SelectedStationMap({
           seen.add(key);
           const tags = item.tags ?? {};
           const isPlatform =
-            tags.railway === 'platform' || tags.public_transport === 'platform';
+            tags.railway === 'platform' || tags.railway === 'platform_edge' || tags.public_transport === 'platform';
+          const isPlatformEdge = tags.railway === 'platform_edge';
           const isStation = ['station', 'halt'].includes(tags.railway ?? '');
           const isEntrance =
             tags.railway === 'subway_entrance' || Boolean(tags.entrance);
@@ -114,7 +155,9 @@ export function SelectedStationMap({
           if (isPlatform) platforms++;
           else if (isEntrance) entrances++;
           else equipment++;
-          if (item.geometry?.length && isPlatform) {
+          if (item.geometry?.length && isPlatformEdge) {
+            const edge = { id: `${item.type}-${item.id}`, track: tags.ref || tags.local_ref || 'ohne Nummer', geometry: item.geometry, length: geometryLength(item.geometry), height: tags.height };
+            edges.push(edge);
             L.polyline(
               item.geometry.map((p) => [p.lat, p.lon] as [number, number]),
               { color: '#00a6c7', weight: 5, opacity: 0.9 },
@@ -123,6 +166,11 @@ export function SelectedStationMap({
                 tags.ref ? `Bahnsteig ${escapeHtml(tags.ref)}` : 'Bahnsteig',
               )
               .addTo(instance!);
+            const start = item.geometry[0], end = item.geometry.at(-1)!;
+            L.circleMarker([start.lat, start.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#20a464', fillOpacity: 1 }).addTo(instance!);
+            L.circleMarker([end.lat, end.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#d54532', fillOpacity: 1 }).addTo(instance!);
+          } else if (item.geometry?.length && isPlatform) {
+            L.polyline(item.geometry.map((p) => [p.lat, p.lon] as [number, number]), { color: '#0b5278', weight: 3, opacity: .55 }).addTo(instance!);
           } else {
             const lat = item.lat ?? item.center?.lat,
               lon = item.lon ?? item.center?.lon;
@@ -149,6 +197,7 @@ export function SelectedStationMap({
           }
         });
         setCounts({ platforms, entrances, equipment });
+        setPlatformEdges(edges.sort((a, b) => a.track.localeCompare(b.track, 'de', { numeric: true })));
       } catch {
         if (!disposed) setCounts({ platforms: 0, entrances: 0, equipment: 0 });
       } finally {
@@ -158,8 +207,15 @@ export function SelectedStationMap({
     return () => {
       disposed = true;
       instance?.remove();
+      mapRef.current = null;
+      satelliteRef.current = null;
+      officialRef.current = null;
     };
-  }, [displayName, station]);
+  }, [displayName, officialImageryAvailable, station]);
+  useEffect(() => {
+    satelliteRef.current?.setOpacity(imagery === 'satellite' ? 1 : 0);
+    officialRef.current?.setOpacity(imagery === 'official' ? 1 : 0);
+  }, [imagery]);
   return (
     <section className="selected-station-card">
       <div className="selected-station-heading">
@@ -192,6 +248,29 @@ export function SelectedStationMap({
         className="selected-station-map"
         aria-label={`Lageplan ${displayName}`}
       />
+      <div className="generic-map-controls" aria-label="Kartenebenen">
+        <button type="button" className={imagery === 'satellite' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'satellite' ? 'none' : 'satellite')}><Satellite size={16}/>Satellit</button>
+        {officialImageryAvailable ? <button type="button" className={imagery === 'official' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'official' ? 'none' : 'official')}><Layers3 size={16}/>Amtliches Luftbild</button> : null}
+      </div>
+      <div className="generic-station-metrics">
+        <div><strong>{platformEdges.length}</strong><span>Bahnsteigkanten</span></div>
+        <div><strong>{counts.entrances}</strong><span>Zugänge</span></div>
+        <div><strong>{counts.equipment}</strong><span>Ausstattung</span></div>
+        <div><strong>{identity?.stationNumber ?? '–'}</strong><span>DB-Stationsnummer</span></div>
+      </div>
+      <div className="platform-check-panel generic-platform-check">
+        <div><strong>Bahnsteiganfänge und -enden prüfen</strong><span>Jeder Endpunkt springt direkt in denselben Luftbildzoom wie in Friedberg.</span></div>
+        <span className="status-ok">OSM-Geometrie geladen</span>
+      </div>
+      <div className="generic-platform-scroll">
+        <table className="platform-data-table">
+          <thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Gleisbezogene Bahnsteignutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead>
+          <tbody>{platformEdges.map((edge) => {
+            const start = edge.geometry[0], end = edge.geometry.at(-1)!;
+            return <tr key={edge.id}><td><span className="track-pill">Gleis {edge.track}</span></td><td><div className="data-value"><strong>{edge.height ? `${Number(edge.height) * 1000} mm` : 'Nicht geliefert'}</strong><span>OpenStreetMap</span></div></td><td><div className="data-value"><strong>{edge.length.toFixed(1)} m</strong><span>OSM-Geometrie</span></div></td><td><span className="data-missing">Nicht geliefert</span></td><td><span className="data-missing">Nicht in RINF zugeordnet</span></td><td><button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'start')}><strong>{start.lat.toFixed(6)}, {start.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button></td><td><button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'end')}><strong>{end.lat.toFixed(6)}, {end.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button></td></tr>;
+          })}{!loading && !platformEdges.length ? <tr><td colSpan={7}><span className="data-missing">Keine OSM-Bahnsteigkanten im Bahnhofsumfeld gefunden.</span></td></tr> : null}</tbody>
+        </table>
+      </div>
     </section>
   );
 }

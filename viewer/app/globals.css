@@ -48,6 +48,19 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .selected-station-meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .selected-station-meta span { border-radius: 999px; background: #edf5f7; padding: 5px 9px; color: #17465d; font-size: .75rem; font-weight: 700; }
 .selected-station-map { height: 520px; border-top: 1px solid var(--border); background: #dce5e8; }
+.generic-map-controls { display: flex; gap: 8px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); padding: 10px 20px; background: #f6f9fa; }
+.generic-station-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); }
+.generic-station-metrics div { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--border); padding: 14px 20px; }
+.generic-station-metrics div:last-child { border-right: 0; }
+.generic-station-metrics strong { color: #0b5278; font-size: 1.35rem; }
+.generic-station-metrics span { color: var(--muted-foreground); font-size: .75rem; font-weight: 650; }
+.generic-platform-check { margin: 0; border-radius: 0; border-inline: 0; }
+.generic-platform-scroll { overflow-x: auto; border-top: 1px solid var(--border); }
+.generic-endpoint-button { display: flex; min-width: 190px; flex-direction: column; gap: 4px; border: 1px solid #cdd9de; border-radius: 5px; background: #f8fbfc; padding: 7px 9px; text-align: left; }
+.generic-endpoint-button:hover, .generic-endpoint-button:focus-visible { border-color: #0b5278; background: #edf7fb; outline: none; }
+.generic-endpoint-button strong { color: #183d4d; font-family: var(--font-mono), monospace; font-size: .68rem; }
+.generic-endpoint-button span { color: #0b5278; font-size: .68rem; font-weight: 750; }
+@media (max-width: 760px) { .generic-station-metrics { grid-template-columns: repeat(2, 1fr); } .selected-station-heading { align-items: start; flex-direction: column; } }
 @media (max-width: 700px) { .germany-map-copy { align-items: stretch; flex-direction: column; } .germany-map-copy form { min-width: 0; } .germany-map { height: 340px; } }
 .station-map-heading { display: flex; align-items: end; justify-content: space-between; gap: 24px; padding: 20px 24px; }
 .station-map-heading h2 { margin: 5px 0 0; color: #071b2b; font-size: 1.35rem; font-weight: 750; letter-spacing: -.02em; }
