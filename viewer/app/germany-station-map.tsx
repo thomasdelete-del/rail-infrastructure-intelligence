@@ -120,6 +120,12 @@ export function SelectedStationMap({
     setImagery(officialImageryAvailable ? 'official' : 'satellite');
     if (point) mapRef.current?.setView([point.lat, point.lon], 21, { animate: false });
   };
+  const focusPlatformLength = (edge: PlatformEdge) => {
+    setReviewKey(null);
+    setImagery(officialImageryAvailable ? 'official' : 'satellite');
+    if (!edge.geometry.length) return;
+    mapRef.current?.fitBounds(edge.geometry.map((point) => [point.lat, point.lon] as [number, number]), { padding: [70, 70], maxZoom: 19, animate: false });
+  };
   useEffect(() => {
     if (!correctionTarget || !mapRef.current) return;
     const map = mapRef.current;
@@ -297,6 +303,14 @@ export function SelectedStationMap({
     platformEdges.filter((edge) => !matched.has(edge.id)).forEach((edge) => rows.push({ track: edge.track, edge, data: undefined }));
     return rows.sort((a, b) => a.track.localeCompare(b.track, 'de', { numeric: true }));
   }, [authoritativePlatforms, platformEdges]);
+  const lengthComparison = (edge?: PlatformEdge, data?: AuthoritativePlatform) => {
+    const dbLength = data?.net_construction_length_m;
+    if (!edge || dbLength == null || dbLength <= 0) return null;
+    const delta = edge.length - dbLength;
+    const percent = Math.abs(delta) / dbLength * 100;
+    return { delta, percent, level: percent <= 5 ? 'low' : percent <= 15 ? 'check' : 'high' } as const;
+  };
+  const lengthComparisons = platformRows.map(({ edge, data }) => lengthComparison(edge, data)).filter((item) => item !== null);
   const reviewEndpoints = useMemo(() => platformEdges.flatMap((edge) => ([
     { edge, endpoint: 'start' as const, key: `${edge.id}:start` },
     { edge, endpoint: 'end' as const, key: `${edge.id}:end` },
@@ -376,16 +390,17 @@ export function SelectedStationMap({
         <div className="generic-platform-overview">{platformRows.map(({ track, data }, index) => <div className="generic-platform-row" key={`overview-${track}`}><strong>B{index + 1}</strong><div><span>Bahnsteig Gleis {track}</span><div><span className="track-pill">Gleis {track}</span>{data?.rinf_platform_id ? <small>RINF {data.rinf_platform_id}{data.rinf_platform_id !== track ? ` → Gleis ${track}` : ''}</small> : <small>RINF nicht zugeordnet</small>}</div></div><i aria-hidden="true"/></div>)}</div>
       </section>
       <div className="platform-check-panel generic-platform-check">
-        <div><strong>Bahnsteiganfänge und -enden prüfen</strong><span>Jeder Endpunkt springt direkt in denselben Luftbildzoom wie in Friedberg.</span></div>
-        <span className="status-ok">OSM-Geometrie geladen</span>
+        <div><strong>Bahnsteigdaten und Plausibilitätscheck</strong><span>OSM-Baulänge wird wie in Friedberg gegen die DB-Nettobaulänge geprüft; Anfang und Ende bleiben unabhängig prüfbar.</span></div>
+        <div className="comparison-summary"><span className="comparison-low">{lengthComparisons.filter((item) => item.level === 'low').length} geringe</span><span className="comparison-check">{lengthComparisons.filter((item) => item.level === 'check').length} prüfen</span><span className="comparison-high">{lengthComparisons.filter((item) => item.level === 'high').length} auffällig</span></div>
       </div>
       <div className="generic-platform-scroll">
         <table className="platform-data-table">
-          <thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Gleisbezogene Bahnsteignutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead>
+          <thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Abweichung OSM–DB</th><th>Gleisbezogene Bahnsteignutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead>
           <tbody>{platformRows.map(({ track, edge, data }) => {
             const start = edge?.geometry[0], end = edge?.geometry.at(-1);
-            return <tr key={`${track}-${edge?.id ?? 'db'}`}><td><div className="data-value"><span className="track-pill">Gleis {track}</span>{edge?.trackSource === 'ref' ? <span>OSM ref={track} · {edge.osmType === 'way' ? 'Weg' : 'Knoten'} {edge.osmId}</span> : edge?.trackSource === 'local_ref' ? <span>OSM local_ref={track}</span> : null}</div></td><td><div className="data-value"><strong>{data?.platform_height_mm != null ? `${data.platform_height_mm} mm` : edge?.height ? `${Number(edge.height) * 1000} mm` : 'Nicht geliefert'}</strong><span>{data?.platform_height_mm != null ? 'DB InfraGO' : 'OpenStreetMap'}</span></div></td><td>{edge ? <div className="data-value"><strong>{edge.length.toFixed(1)} m</strong><span>OSM-Geometrie</span></div> : <span className="data-missing">Keine OSM-Kante zugeordnet</span>}</td><td>{data?.net_construction_length_m != null ? <div className="data-value"><strong>{data.net_construction_length_m.toFixed(1)} m</strong><span>DB InfraGO Stationsausstattung</span></div> : <span className="data-missing">Bei DB InfraGO nicht geliefert</span>}</td><td>{data?.usable_length_m != null ? <div className="data-value"><strong>{data.usable_length_m.toFixed(1)} m</strong><span>RINF {data.rinf_platform_id || track}{data.rinf_platform_id && data.rinf_platform_id !== track ? ` → DB Gleis ${track}` : ''}</span>{data.rinf_track_id ? <span>Track-ID {data.rinf_track_id} · {data.mapping_confidence === 'confirmed' ? 'bestätigt' : data.mapping_confidence === 'derived' ? 'eindeutig abgeleitet' : 'nicht zugeordnet'}</span> : null}</div> : <span className="data-missing">In RINF nicht zugeordnet</span>}</td><td>{edge && start ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'start')}><strong>{start.lat.toFixed(6)}, {start.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td><td>{edge && end ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'end')}><strong>{end.lat.toFixed(6)}, {end.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td></tr>;
-          })}{!loading && !platformRows.length ? <tr><td colSpan={7}><span className="data-missing">Keine Bahnsteigdaten in DB InfraGO, RINF oder OSM gefunden.</span></td></tr> : null}</tbody>
+            const comparison = lengthComparison(edge, data);
+            return <tr key={`${track}-${edge?.id ?? 'db'}`} className={comparison?.level === 'high' ? 'row-deviation-high' : undefined}><td><div className="data-value"><span className="track-pill">Gleis {track}</span>{edge?.trackSource === 'ref' ? <span>OSM ref={track} · {edge.osmType === 'way' ? 'Weg' : 'Knoten'} {edge.osmId}</span> : edge?.trackSource === 'local_ref' ? <span>OSM local_ref={track}</span> : null}</div></td><td><div className="data-value"><strong>{data?.platform_height_mm != null ? `${data.platform_height_mm} mm` : edge?.height ? `${Number(edge.height) * 1000} mm` : 'Nicht geliefert'}</strong><span>{data?.platform_height_mm != null ? 'DB InfraGO' : 'OpenStreetMap'}</span></div></td><td>{edge ? <div className="data-value"><strong>{edge.length.toFixed(1)} m</strong><span>OSM-Geometrie</span></div> : <span className="data-missing">Keine OSM-Kante zugeordnet</span>}</td><td>{data?.net_construction_length_m != null ? <div className="data-value"><strong>{data.net_construction_length_m.toFixed(1)} m</strong><span>DB InfraGO Stationsausstattung</span></div> : <span className="data-missing">Bei DB InfraGO nicht geliefert</span>}</td><td>{comparison && edge ? <button type="button" className={`deviation deviation-${comparison.level} deviation-button`} onClick={() => focusPlatformLength(edge)} title="Bahnsteigkante im Luftbild anzeigen"><strong>OSM {Math.abs(comparison.delta).toFixed(1)} m {comparison.delta >= 0 ? 'länger' : 'kürzer'}</strong><span>als DB · {comparison.percent.toFixed(1)}% · {comparison.level === 'low' ? 'gering' : comparison.level === 'check' ? 'prüfen' : 'auffällig'}</span><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Nicht vergleichbar</span>}</td><td>{data?.usable_length_m != null ? <div className="data-value"><strong>{data.usable_length_m.toFixed(1)} m</strong><span>RINF {data.rinf_platform_id || track}{data.rinf_platform_id && data.rinf_platform_id !== track ? ` → DB Gleis ${track}` : ''}</span>{data.rinf_track_id ? <span>Track-ID {data.rinf_track_id} · {data.mapping_confidence === 'confirmed' ? 'bestätigt' : data.mapping_confidence === 'derived' ? 'eindeutig abgeleitet' : 'nicht zugeordnet'}</span> : null}</div> : <span className="data-missing">In RINF nicht zugeordnet</span>}</td><td>{edge && start ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'start')}><strong>{start.lat.toFixed(6)}, {start.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td><td>{edge && end ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'end')}><strong>{end.lat.toFixed(6)}, {end.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td></tr>;
+          })}{!loading && !platformRows.length ? <tr><td colSpan={8}><span className="data-missing">Keine Bahnsteigdaten in DB InfraGO, RINF oder OSM gefunden.</span></td></tr> : null}</tbody>
         </table>
       </div>
     </section>
