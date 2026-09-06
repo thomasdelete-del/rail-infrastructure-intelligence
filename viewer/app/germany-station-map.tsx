@@ -116,6 +116,7 @@ export function SelectedStationMap({
   const [selectedObjectKey, setSelectedObjectKey] = useState<string | null>(null);
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [loading, setLoading] = useState(true);
+  const [osmGeometryStatus, setOsmGeometryStatus] = useState<'loading' | 'active' | 'unavailable'>('loading');
   const [reviewKey, setReviewKey] = useState<string | null>(null);
   const [endpointReviews, setEndpointReviews] = useState<Record<string, 'correct' | 'none' | 'corrected'>>({});
   const [osmConfirmed, setOsmConfirmed] = useState<Record<string, boolean>>({});
@@ -198,6 +199,7 @@ export function SelectedStationMap({
   useEffect(() => {
     if (!el.current) return;
     setLoading(true);
+    setOsmGeometryStatus('loading');
     setCounts({ platforms: 0, entrances: 0, equipment: 0 });
     setPlatformEdges([]);
     setImagery('none');
@@ -241,6 +243,7 @@ export function SelectedStationMap({
         if (!response.ok) throw new Error();
         const data = (await response.json()) as { elements: OsmElement[] };
         if (disposed) return;
+        setOsmGeometryStatus(data.elements.length ? 'active' : 'unavailable');
         let entrances = 0,
           equipment = 0;
         const explicitEdges: PlatformEdge[] = [];
@@ -315,7 +318,7 @@ export function SelectedStationMap({
         setCounts({ platforms: edges.length, entrances, equipment });
         setPlatformEdges(edges.sort((a, b) => a.track.localeCompare(b.track, 'de', { numeric: true })));
       } catch {
-        if (!disposed) setCounts({ platforms: 0, entrances: 0, equipment: 0 });
+        if (!disposed) { setCounts({ platforms: 0, entrances: 0, equipment: 0 }); setOsmGeometryStatus('unavailable'); }
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -404,12 +407,12 @@ export function SelectedStationMap({
     setEndpointReviews((current) => ({ ...current, [`${currentReview.edge.id}:start`]: 'corrected', [`${currentReview.edge.id}:end`]: 'corrected' }));
   };
   const sourceEntries = [
-    { name: 'DB InfraGO StaDa', quality: 'A', active: dbSources.stada === 'active' },
-    { name: 'DB InfraGO OpenStation / NeTEx', quality: 'A', active: dbSources.netex === 'active' },
-    { name: 'ERA Infrastrukturregister RINF', quality: 'A', active: dbSources.rinf === 'active' },
-    { name: 'OpenStreetMap', quality: 'D', active: dbSources.osm === 'active' || platformEdges.length > 0 },
-    { name: 'Amtliches Luftbild', quality: 'A', active: officialImageryAvailable },
-    { name: 'DB InfraGO FaSta', quality: 'A', active: dbSources.fasta === 'active' },
+    { name: 'DB InfraGO StaDa', quality: 'A', state: dbSources.stada === 'active' ? 'active' : 'unavailable' },
+    { name: 'DB InfraGO OpenStation / NeTEx', quality: 'A', state: dbSources.netex === 'active' ? 'active' : 'unavailable' },
+    { name: 'ERA Infrastrukturregister RINF', quality: 'A', state: dbSources.rinf === 'active' ? 'active' : 'unavailable' },
+    { name: 'OpenStreetMap', quality: 'D', state: dbSources.osm === 'active' || osmGeometryStatus === 'active' || platformEdges.length > 0 ? 'active' : osmGeometryStatus === 'loading' ? 'loading' : 'unavailable' },
+    { name: 'Amtliches Luftbild', quality: 'A', state: officialImageryAvailable ? 'active' : 'unavailable' },
+    { name: 'DB InfraGO FaSta', quality: 'A', state: dbSources.fasta === 'active' ? 'active' : 'unavailable' },
   ];
   const inventoryObjects = inventory?.objects ?? [];
   const inventoryCounts = Object.fromEntries(['platform', 'platform_edge', 'entrance', 'equipment'].map((type) => [type, inventoryObjects.filter((item) => item.object_type === type).length]));
@@ -468,8 +471,8 @@ export function SelectedStationMap({
         <div><strong>{identity?.stationNumber ?? '–'}</strong><span>DB-Stationsnummer</span></div>
       </div>
       <section className="generic-feature-card">
-        <div className="generic-feature-heading"><div><h2>Datenquellen</h2><p>Aktive Verbindungen und Qualitätsklasse für {authoritativeName}</p></div><strong>{sourceEntries.filter((source) => source.active).length} von {sourceEntries.length} verbunden</strong></div>
-        <div className="source-grid">{sourceEntries.map((source) => <div className="source-row" key={source.name}><span className={`source-indicator ${source.active ? 'source-active' : 'source-pending'}`}/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{source.name}</p><p className="mt-1 text-xs text-muted-foreground">Qualitätsklasse {source.quality}</p></div><span className={source.active ? 'source-state-active' : 'source-state-pending'}>{source.active ? 'Aktiv' : 'Nicht verfügbar'}</span></div>)}</div>
+        <div className="generic-feature-heading"><div><h2>Datenquellen</h2><p>Aktive Verbindungen und Qualitätsklasse für {authoritativeName}</p></div><strong>{sourceEntries.filter((source) => source.state === 'active').length} von {sourceEntries.length} verbunden</strong></div>
+        <div className="source-grid">{sourceEntries.map((source) => <div className="source-row" key={source.name}><span className={`source-indicator ${source.state === 'active' ? 'source-active' : 'source-pending'}`}/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{source.name}</p><p className="mt-1 text-xs text-muted-foreground">Qualitätsklasse {source.quality}</p></div><span className={source.state === 'active' ? 'source-state-active' : 'source-state-pending'}>{source.state === 'active' ? 'Aktiv' : source.state === 'loading' ? 'Wird geladen' : 'Nicht verfügbar'}</span></div>)}</div>
       </section>
       <section className="generic-feature-card">
         <div className="generic-feature-heading"><div><h2>Bahnsteigübersicht</h2><p>DB-Gleisnummern mit zugeordneten RINF-Infrastrukturkennungen</p></div><span className="status-ok"><ShieldCheck size={15}/>Identität geprüft</span></div>
