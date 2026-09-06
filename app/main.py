@@ -20,6 +20,7 @@ from app.services.aerial_analysis import analyse_osm_platform
 from app.services.aerial_learning import store_training_sample
 from app.services.station_identity import prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_stada_identity, resolve_station_identity, search_netex_stations, stada_station_list
 from app.services.dynamic_station_sources import collect_db_station_sources
+from app.services.platform_data import load_platform_data
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
 app.add_middleware(
@@ -109,6 +110,15 @@ async def dynamic_sources(name: str = Query(min_length=2, max_length=160), latit
         "openstreetmap": {"status": "active" if isinstance(osm, dict) else "not_found", "role": "geometry_only"},
         **db_sources,
     }}
+
+@app.get("/stations/platform-data")
+async def station_platform_data(name: str = Query(min_length=2, max_length=160), ril: str = Query(min_length=2, max_length=12)):
+    try:
+        return await load_platform_data(name, ril)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="Platform data sources are temporarily unavailable") from error
 
 @app.get("/stations/friedberg-hess")
 def friedberg():

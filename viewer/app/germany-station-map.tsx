@@ -45,6 +45,13 @@ type PlatformEdge = {
   length: number;
   height?: string;
 };
+type AuthoritativePlatform = {
+  track: string;
+  platform_height_mm?: number | null;
+  net_construction_length_m?: number | null;
+  usable_length_m?: number | null;
+  rinf_platform_id?: string | null;
+};
 
 const distance = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
   const radians = (value: number) => value * Math.PI / 180;
@@ -90,6 +97,7 @@ export function SelectedStationMap({
   } | null>(null);
   const [dbSources, setDbSources] = useState<{ netex?: string; rinf?: string; osm?: string; stada?: string; fasta?: string; facilities?: number }>({});
   const [platformEdges, setPlatformEdges] = useState<PlatformEdge[]>([]);
+  const [authoritativePlatforms, setAuthoritativePlatforms] = useState<AuthoritativePlatform[]>([]);
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [loading, setLoading] = useState(true);
   const authoritativeName = identity?.name || station.name;
@@ -105,11 +113,12 @@ export function SelectedStationMap({
   useEffect(() => {
     setIdentity(null);
     setDbSources({});
+    setAuthoritativePlatforms([]);
     const controller = new AbortController();
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
     void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
-      .then((raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); })
+      .then(async (raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); if (value.ril) { const platformParameters = new URLSearchParams({ name: value.matched_name || station.name, ril: value.ril }); const response = await fetch(`${API}/stations/platform-data?${platformParameters}`, { cache: 'no-store', signal: controller.signal }); if (response.ok) { const data = await response.json() as { platforms: AuthoritativePlatform[]; status: { era_rinf?: string } }; setAuthoritativePlatforms(data.platforms); setDbSources((current) => ({ ...current, rinf: data.status.era_rinf })); } } })
       .catch((error: Error) => { if (error.name !== 'AbortError') setIdentity(null); });
     return () => controller.abort();
   }, [station]);
@@ -244,6 +253,16 @@ export function SelectedStationMap({
     satelliteRef.current?.setOpacity(imagery === 'satellite' ? 1 : 0);
     officialRef.current?.setOpacity(imagery === 'official' ? 1 : 0);
   }, [imagery]);
+  const platformRows = useMemo(() => {
+    const matched = new Set<string>();
+    const rows = authoritativePlatforms.map((data) => {
+      const edge = platformEdges.find((candidate) => candidate.track === data.track);
+      if (edge) matched.add(edge.id);
+      return { track: data.track, edge, data };
+    });
+    platformEdges.filter((edge) => !matched.has(edge.id)).forEach((edge) => rows.push({ track: edge.track, edge, data: undefined }));
+    return rows.sort((a, b) => a.track.localeCompare(b.track, 'de', { numeric: true }));
+  }, [authoritativePlatforms, platformEdges]);
   return (
     <section className="selected-station-card">
       <div className="selected-station-heading">
@@ -282,7 +301,7 @@ export function SelectedStationMap({
         {officialImageryAvailable ? <button type="button" className={imagery === 'official' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'official' ? 'none' : 'official')}><Layers3 size={16}/>Amtliches Luftbild</button> : null}
       </div>
       <div className="generic-station-metrics">
-        <div><strong>{platformEdges.length}</strong><span>Bahnsteigkanten</span></div>
+        <div><strong>{platformRows.length}</strong><span>Bahnsteigkanten</span></div>
         <div><strong>{counts.entrances}</strong><span>Zugänge</span></div>
         <div><strong>{counts.equipment}</strong><span>Ausstattung</span></div>
         <div><strong>{identity?.stationNumber ?? '–'}</strong><span>DB-Stationsnummer</span></div>
@@ -294,10 +313,10 @@ export function SelectedStationMap({
       <div className="generic-platform-scroll">
         <table className="platform-data-table">
           <thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Gleisbezogene Bahnsteignutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead>
-          <tbody>{platformEdges.map((edge) => {
-            const start = edge.geometry[0], end = edge.geometry.at(-1)!;
-            return <tr key={edge.id}><td><span className="track-pill">Gleis {edge.track}</span></td><td><div className="data-value"><strong>{edge.height ? `${Number(edge.height) * 1000} mm` : 'Nicht geliefert'}</strong><span>OpenStreetMap</span></div></td><td><div className="data-value"><strong>{edge.length.toFixed(1)} m</strong><span>OSM-Geometrie</span></div></td><td><span className="data-missing">Nicht geliefert</span></td><td><span className="data-missing">Nicht in RINF zugeordnet</span></td><td><button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'start')}><strong>{start.lat.toFixed(6)}, {start.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button></td><td><button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'end')}><strong>{end.lat.toFixed(6)}, {end.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button></td></tr>;
-          })}{!loading && !platformEdges.length ? <tr><td colSpan={7}><span className="data-missing">Keine OSM-Bahnsteigkanten im Bahnhofsumfeld gefunden.</span></td></tr> : null}</tbody>
+          <tbody>{platformRows.map(({ track, edge, data }) => {
+            const start = edge?.geometry[0], end = edge?.geometry.at(-1);
+            return <tr key={`${track}-${edge?.id ?? 'db'}`}><td><span className="track-pill">Gleis {track}</span></td><td><div className="data-value"><strong>{data?.platform_height_mm != null ? `${data.platform_height_mm} mm` : edge?.height ? `${Number(edge.height) * 1000} mm` : 'Nicht geliefert'}</strong><span>{data?.platform_height_mm != null ? 'DB InfraGO' : 'OpenStreetMap'}</span></div></td><td>{edge ? <div className="data-value"><strong>{edge.length.toFixed(1)} m</strong><span>OSM-Geometrie</span></div> : <span className="data-missing">Keine OSM-Kante zugeordnet</span>}</td><td>{data?.net_construction_length_m != null ? <div className="data-value"><strong>{data.net_construction_length_m.toFixed(1)} m</strong><span>DB InfraGO Stationsausstattung</span></div> : <span className="data-missing">Bei DB InfraGO nicht geliefert</span>}</td><td>{data?.usable_length_m != null ? <div className="data-value"><strong>{data.usable_length_m.toFixed(1)} m</strong><span>ERA RINF · {data.rinf_platform_id || track}</span></div> : <span className="data-missing">In RINF nicht zugeordnet</span>}</td><td>{edge && start ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'start')}><strong>{start.lat.toFixed(6)}, {start.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td><td>{edge && end ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'end')}><strong>{end.lat.toFixed(6)}, {end.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td></tr>;
+          })}{!loading && !platformRows.length ? <tr><td colSpan={7}><span className="data-missing">Keine Bahnsteigdaten in DB InfraGO, RINF oder OSM gefunden.</span></td></tr> : null}</tbody>
         </table>
       </div>
     </section>
