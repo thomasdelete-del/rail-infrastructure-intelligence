@@ -18,7 +18,7 @@ from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBER
 from app.services.change_report import build_change_report
 from app.services.aerial_analysis import analyse_osm_platform
 from app.services.aerial_learning import store_training_sample
-from app.services.station_identity import prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_stada_identity, resolve_station_identity, search_netex_stations, stada_station_list
+from app.services.station_identity import netex_xml, prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_stada_identity, resolve_station_identity, search_netex_stations, stada_station_list
 from app.services.dynamic_station_sources import collect_db_station_sources
 from app.services.platform_data import load_platform_data
 
@@ -125,7 +125,7 @@ async def station_platform_data(name: str = Query(min_length=2, max_length=160),
 async def station_infrastructure(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
     """Build the same NeTEx object catalogue for every identity-matched station."""
     try:
-        xml = await OpenStationCollector().fetch_netex()
+        xml = await netex_xml()
         identity = select_station_identity_from_netex(xml, name, latitude, longitude)
         return stop_place_inventory(extract_station_stop_place(xml, identity["netex_id"]))
     except LookupError as error:

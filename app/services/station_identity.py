@@ -85,6 +85,11 @@ async def _netex_xml() -> bytes:
         return _NETEX_CACHE[1]
 
 
+async def netex_xml() -> bytes:
+    """Public cached NeTEx delivery for identity and infrastructure consumers."""
+    return await _netex_xml()
+
+
 async def search_netex_stations(query: str, limit: int = 12) -> list[dict[str, Any]]:
     """Return ranked DB NeTEx stations for the station picker."""
     from app.collectors.openstation import extract_station_identities
