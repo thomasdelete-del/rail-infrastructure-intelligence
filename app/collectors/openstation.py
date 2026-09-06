@@ -199,8 +199,15 @@ def equipment_attributes(element: Element) -> dict[str, Any]:
     return attributes
 
 
-def parse_stop_place(stop_place: Element) -> dict[str, Any] | None:
-    identity = strict_friedberg_identity(stop_place)
+def parse_stop_place(stop_place: Element, expected_netex_id: str | None = None) -> dict[str, Any] | None:
+    generic_identity = station_identity(stop_place)
+    if expected_netex_id is not None:
+        if generic_identity is None or generic_identity["netex_id"] != expected_netex_id:
+            return None
+        keys = key_values(stop_place)
+        identity = {"name": generic_identity["name"], "station_number": generic_identity["station_number"], "keys": keys}
+    else:
+        identity = strict_friedberg_identity(stop_place)
     stop_id = stop_place.attrib.get("id")
     if identity is None or not stop_id:
         return None
@@ -271,6 +278,51 @@ def extract_friedberg_stop_places(xml: bytes) -> list[dict[str, Any]]:
                 matches.append(record)
             element.clear()
     return matches
+
+
+def extract_station_stop_place(xml: bytes, netex_id: str) -> dict[str, Any]:
+    """Extract one identity-selected StopPlace with the same object model as Friedberg."""
+    for _, element in iterparse(BytesIO(xml), events=("end",)):
+        if local_name(element.tag) == "StopPlace":
+            record = parse_stop_place(element, expected_netex_id=netex_id)
+            if record is not None:
+                return record
+            element.clear()
+    raise LookupError("Selected NeTEx StopPlace has no infrastructure record")
+
+
+def stop_place_inventory(record: dict[str, Any]) -> dict[str, Any]:
+    """Return the common evidence-oriented inventory shape used by the viewer."""
+    entities = record["entities"]
+    by_id = {entity["netex_id"]: entity for entity in entities}
+
+    def depth(entity: dict[str, Any]) -> int:
+        result, parent = 0, entity.get("parent_netex_id")
+        visited: set[str] = set()
+        while parent and parent in by_id and parent not in visited:
+            visited.add(parent)
+            result += 1
+            parent = by_id[parent].get("parent_netex_id")
+        return result
+
+    objects = []
+    for entity in entities:
+        objects.append({
+            "object_key": entity["netex_id"],
+            "object_type": entity["object_type"],
+            "parent_object_key": entity.get("parent_netex_id"),
+            "depth": depth(entity),
+            "observations": [{
+                "attribute": attribute,
+                "value": value,
+                "unit": "degree" if attribute in {"latitude", "longitude"} else None,
+                "source_key": "db-infrago-openstation-netex",
+                "observed_at": None,
+                "provenance": {"netex_id": entity["netex_id"], "netex_type": entity["netex_type"]},
+            } for attribute, value in entity["attributes"].items()],
+        })
+    objects.sort(key=lambda item: (item["depth"], item["object_type"], item["object_key"]))
+    return {"station": record["name"], "object_count": len(objects), "objects": objects}
 
 
 class OpenStationCollector(Collector):

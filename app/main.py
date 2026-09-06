@@ -4,7 +4,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from app.collectors.openstation import OpenStationCollector, select_station_identity_from_netex
+from app.collectors.openstation import OpenStationCollector, extract_station_stop_place, select_station_identity_from_netex, stop_place_inventory
 from app.collectors.osm import OpenStreetMapCollector
 from app.collectors.stada import StaDaCollector
 from app.collectors.fasta import FaStaCollector
@@ -119,6 +119,21 @@ async def station_platform_data(name: str = Query(min_length=2, max_length=160),
         raise HTTPException(status_code=422, detail=str(error)) from error
     except httpx.HTTPError as error:
         raise HTTPException(status_code=502, detail="Platform data sources are temporarily unavailable") from error
+
+
+@app.get("/stations/infrastructure")
+async def station_infrastructure(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
+    """Build the same NeTEx object catalogue for every identity-matched station."""
+    try:
+        xml = await OpenStationCollector().fetch_netex()
+        identity = select_station_identity_from_netex(xml, name, latitude, longitude)
+        return stop_place_inventory(extract_station_stop_place(xml, identity["netex_id"]))
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="NeTEx infrastructure is temporarily unavailable") from error
 
 @app.get("/stations/friedberg-hess")
 def friedberg():

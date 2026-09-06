@@ -1,7 +1,7 @@
 import asyncio
 import pytest
 
-from app.collectors.openstation import OpenStationCollector, extract_friedberg_stop_places, select_station_identity_from_netex
+from app.collectors.openstation import OpenStationCollector, extract_friedberg_stop_places, extract_station_stop_place, select_station_identity_from_netex, stop_place_inventory
 
 XML = b'''<PublicationDelivery xmlns="http://www.netex.org.uk/netex"><StopPlace id="sp-hess">
 <keyList><KeyValue><Key>EVA</Key><Value>8000111</Value></KeyValue><KeyValue><Key>RIL</Key><Value>FFG</Value></KeyValue></keyList>
@@ -65,3 +65,13 @@ def test_rejects_similar_station_name_when_netex_coordinates_are_missing():
     xml = b'<root><StopPlace id="norheim"><Name>Norheim</Name><PrivateCode>4584</PrivateCode></StopPlace></root>'
     with pytest.raises(LookupError):
         select_station_identity_from_netex(xml, "Dorheim", 50.35, 8.79)
+
+
+def test_generic_station_uses_same_evidence_inventory_shape():
+    inventory = stop_place_inventory(extract_station_stop_place(XML, "sp-hess"))
+    assert inventory["object_count"] == 6
+    edge = next(item for item in inventory["objects"] if item["object_type"] == "platform_edge")
+    assert edge["parent_object_key"] == "platform-1"
+    assert edge["depth"] == 2
+    assert next(item for item in edge["observations"] if item["attribute"] == "public_code")["value"] == 1
+    assert all(item["source_key"] == "db-infrago-openstation-netex" for item in edge["observations"])

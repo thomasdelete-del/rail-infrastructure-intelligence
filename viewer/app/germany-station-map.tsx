@@ -58,6 +58,11 @@ type AuthoritativePlatform = {
   mapping_method?: string | null;
   mapping_confidence?: string | null;
 };
+type InventoryObservation = { attribute: string; value: unknown; unit?: string | null; source_key: string; provenance?: Record<string, unknown> };
+type InventoryObject = { object_key: string; object_type: string; parent_object_key?: string | null; depth: number; observations: InventoryObservation[] };
+type StationInventory = { station: string; object_count: number; objects: InventoryObject[] };
+const objectTypeLabels: Record<string, string> = { stop_place: 'Bahnhof', platform: 'Bahnsteig', platform_edge: 'Bahnsteigkante', entrance: 'Zugang', equipment: 'Ausstattung' };
+const inventoryAttributeLabels: Record<string, string> = { name: 'Bezeichnung', public_code: 'Gleis', quay_type: 'Bahnsteigtyp', mobility_impaired_access: 'Barrierefreiheit', wheelchair_access: 'Rollstuhlzugang', step_free_access: 'Stufenfreier Zugang', tactile_guidance_available: 'Taktiles Leitsystem', visual_signs_available: 'Visuelle Anzeigen', equipment_type: 'Ausstattungstyp', number_of_steps: 'Stufen', safe_for_guide_dog: 'Für Blindenführhund geeignet', latitude: 'Breitengrad', longitude: 'Längengrad', station_number: 'Stationsnummer', eva: 'EVA', ril: 'RIL 100' };
 
 const distance = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
   const radians = (value: number) => value * Math.PI / 180;
@@ -104,6 +109,10 @@ export function SelectedStationMap({
   const [dbSources, setDbSources] = useState<{ netex?: string; rinf?: string; osm?: string; stada?: string; fasta?: string; facilities?: number }>({});
   const [platformEdges, setPlatformEdges] = useState<PlatformEdge[]>([]);
   const [authoritativePlatforms, setAuthoritativePlatforms] = useState<AuthoritativePlatform[]>([]);
+  const [inventory, setInventory] = useState<StationInventory | null>(null);
+  const [inventoryQuery, setInventoryQuery] = useState('');
+  const [inventoryType, setInventoryType] = useState('all');
+  const [selectedObjectKey, setSelectedObjectKey] = useState<string | null>(null);
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [loading, setLoading] = useState(true);
   const [reviewKey, setReviewKey] = useState<string | null>(null);
@@ -162,12 +171,23 @@ export function SelectedStationMap({
     setIdentity(null);
     setDbSources({});
     setAuthoritativePlatforms([]);
+    setInventory(null);
+    setSelectedObjectKey(null);
     const controller = new AbortController();
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
     void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
       .then(async (raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); if (value.ril) { const platformParameters = new URLSearchParams({ name: value.matched_name || station.name, ril: value.ril }); const response = await fetch(`${API}/stations/platform-data?${platformParameters}`, { cache: 'no-store', signal: controller.signal }); if (response.ok) { const data = await response.json() as { platforms: AuthoritativePlatform[]; status: { era_rinf?: string } }; setAuthoritativePlatforms(data.platforms); setDbSources((current) => ({ ...current, rinf: data.status.era_rinf })); } } })
       .catch((error: Error) => { if (error.name !== 'AbortError') setIdentity(null); });
+    return () => controller.abort();
+  }, [station]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
+    void fetch(`${API}/stations/infrastructure?${parameters}`, { cache: 'no-store', signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
+      .then((data: StationInventory) => { setInventory(data); setSelectedObjectKey(data.objects[0]?.object_key ?? null); })
+      .catch((error: Error) => { if (error.name !== 'AbortError') setInventory({ station: station.name, object_count: 0, objects: [] }); });
     return () => controller.abort();
   }, [station]);
   useEffect(() => {
@@ -357,6 +377,17 @@ export function SelectedStationMap({
     { name: 'Amtliches Luftbild', quality: 'A', active: officialImageryAvailable },
     { name: 'DB InfraGO FaSta', quality: 'A', active: dbSources.fasta === 'active' },
   ];
+  const inventoryObjects = inventory?.objects ?? [];
+  const inventoryCounts = Object.fromEntries(['platform', 'platform_edge', 'entrance', 'equipment'].map((type) => [type, inventoryObjects.filter((item) => item.object_type === type).length]));
+  const normalizedInventoryQuery = normalizeSearch(inventoryQuery.trim());
+  const filteredInventory = inventoryObjects.filter((item) => {
+    if (inventoryType !== 'all' && item.object_type !== inventoryType) return false;
+    if (!normalizedInventoryQuery) return true;
+    return normalizeSearch([item.object_key, objectTypeLabels[item.object_type], ...item.observations.map((observation) => String(observation.value))].join(' ')).includes(normalizedInventoryQuery);
+  });
+  const selectedInventoryObject = inventoryObjects.find((item) => item.object_key === selectedObjectKey) ?? filteredInventory[0] ?? null;
+  const objectTitle = (item: InventoryObject) => String(item.observations.find((observation) => observation.attribute === 'name')?.value ?? objectTypeLabels[item.object_type] ?? item.object_type);
+  const displayInventoryValue = (value: unknown, unit?: string | null) => `${typeof value === 'boolean' ? value ? 'Ja' : 'Nein' : String(value ?? 'Nicht geliefert')}${unit && unit !== 'degree' ? ` ${unit}` : ''}`;
   return (
     <section className="selected-station-card">
       <div className="selected-station-heading">
@@ -427,6 +458,12 @@ export function SelectedStationMap({
         </table>
       </div>
       <div className="platform-data-note"><ShieldCheck size={16}/><p>OSM-Geometrie, DB-Nettobaulänge und RINF-Nutzlänge bleiben getrennte Quellen. Bestätigungen und Endpunktkorrekturen werden je Station gespeichert; auffällige Werte werden nicht automatisch überschrieben.</p></div>
+      <section className="object-catalog generic-object-catalog">
+        <div className="catalog-toolbar"><div><h2>Objektkatalog</h2><p>Infrastruktur durchsuchen und Evidenz im Detail prüfen</p></div><div className="catalog-search"><Search size={17}/><input value={inventoryQuery} onChange={(event) => setInventoryQuery(event.target.value)} placeholder="Name, Gleis oder NeTEx-ID" aria-label="Objektkatalog durchsuchen"/></div></div>
+        <div className="catalog-filters" aria-label="Objekttyp filtern">{[['all','Alle'],['platform','Bahnsteig'],['platform_edge','Bahnsteigkante'],['entrance','Zugang'],['equipment','Ausstattung']].map(([type, label]) => <button type="button" key={type} className={inventoryType === type ? 'active' : ''} onClick={() => setInventoryType(type)}>{label}{type !== 'all' ? <span>{inventoryCounts[type] ?? 0}</span> : null}</button>)}</div>
+        <div className="catalog-body"><div className="object-list" role="list" aria-label={`${filteredInventory.length} gefundene Objekte`}><p className="catalog-result-count">{filteredInventory.length} Objekte</p>{filteredInventory.map((item) => <button role="listitem" type="button" key={item.object_key} onClick={() => setSelectedObjectKey(item.object_key)} className={selectedInventoryObject?.object_key === item.object_key ? 'object-row object-row-active' : 'object-row'} aria-current={selectedInventoryObject?.object_key === item.object_key ? 'true' : undefined}><span className={`type-dot type-${item.object_type}`}/><span><strong>{objectTitle(item)}</strong><small>{objectTypeLabels[item.object_type] ?? item.object_type} · {item.observations.length} Werte</small></span><span aria-hidden="true">›</span></button>)}{inventory === null ? <div className="catalog-empty">NeTEx-Infrastruktur wird geladen …</div> : !filteredInventory.length ? <div className="catalog-empty">Keine passenden Objekte gefunden</div> : null}</div>
+        <div className="object-detail">{selectedInventoryObject ? <><span className="object-type-badge">{objectTypeLabels[selectedInventoryObject.object_type] ?? selectedInventoryObject.object_type}</span><h3>{objectTitle(selectedInventoryObject)}</h3><code>{selectedInventoryObject.object_key}</code><table><thead><tr><th>Attribut</th><th>Wert</th><th>Quelle</th></tr></thead><tbody>{selectedInventoryObject.observations.map((observation, index) => <tr key={`${observation.attribute}-${index}`}><td>{inventoryAttributeLabels[observation.attribute] ?? observation.attribute.replaceAll('_', ' ')}</td><td><strong>{displayInventoryValue(observation.value, observation.unit)}</strong></td><td><span className="evidence-source">DB OpenStation</span></td></tr>)}</tbody></table></> : <div className="catalog-empty">Objekt auswählen</div>}</div></div>
+      </section>
     </section>
   );
 }
