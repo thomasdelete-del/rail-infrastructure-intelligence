@@ -41,6 +41,9 @@ type OsmElement = {
 type PlatformEdge = {
   id: string;
   track: string;
+  trackSource: 'ref' | 'local_ref' | 'single_platform_fallback' | 'unknown';
+  osmType: 'node' | 'way';
+  osmId: number;
   geometry: Array<{ lat: number; lon: number }>;
   length: number;
   height?: string;
@@ -217,13 +220,14 @@ export function SelectedStationMap({
           if (isEntrance) entrances++;
           else if (!isPlatform) equipment++;
           if (item.geometry?.length && isPlatformEdge) {
-            const edge = { id: `${item.type}-${item.id}`, track: tags.ref || tags.local_ref || 'ohne Nummer', geometry: item.geometry, length: geometryLength(item.geometry), height: tags.height };
+            const edge = { id: `${item.type}-${item.id}`, track: tags.ref || tags.local_ref || 'ohne Nummer', trackSource: tags.ref ? 'ref' as const : tags.local_ref ? 'local_ref' as const : 'unknown' as const, osmType: item.type, osmId: item.id, geometry: item.geometry, length: geometryLength(item.geometry), height: tags.height };
             explicitEdges.push(edge);
           } else if (item.geometry?.length && isPlatform) {
             L.polyline(item.geometry.map((p) => [p.lat, p.lon] as [number, number]), { color: '#0b5278', weight: 3, opacity: .55 }).addTo(instance!);
             const axis = platformAxis(item.geometry);
             if (axis && axis[2] >= 40 && tags.railway === 'platform') platformCandidates.push({
               id: `${item.type}-${item.id}`, track: tags.ref || tags.local_ref || '',
+              trackSource: tags.ref ? 'ref' : tags.local_ref ? 'local_ref' : 'unknown', osmType: item.type, osmId: item.id,
               geometry: [axis[0], axis[1]], length: axis[2], height: tags.height,
             });
           } else {
@@ -252,7 +256,10 @@ export function SelectedStationMap({
           }
         });
         const edges = explicitEdges.length ? explicitEdges : platformCandidates;
-        if (edges.length === 1 && !edges[0].track) edges[0].track = '1';
+        if (edges.length === 1 && !edges[0].track) {
+          edges[0].track = '1';
+          edges[0].trackSource = 'single_platform_fallback';
+        }
         edges.forEach((edge) => {
           L.polyline(edge.geometry.map((point) => [point.lat, point.lon] as [number, number]), { color: '#00a6c7', weight: 5, opacity: .9 })
             .bindTooltip(`Gleis ${escapeHtml(edge.track || 'ohne Nummer')}`).addTo(instance!);
@@ -377,7 +384,7 @@ export function SelectedStationMap({
           <thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Gleisbezogene Bahnsteignutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead>
           <tbody>{platformRows.map(({ track, edge, data }) => {
             const start = edge?.geometry[0], end = edge?.geometry.at(-1);
-            return <tr key={`${track}-${edge?.id ?? 'db'}`}><td><span className="track-pill">Gleis {track}</span></td><td><div className="data-value"><strong>{data?.platform_height_mm != null ? `${data.platform_height_mm} mm` : edge?.height ? `${Number(edge.height) * 1000} mm` : 'Nicht geliefert'}</strong><span>{data?.platform_height_mm != null ? 'DB InfraGO' : 'OpenStreetMap'}</span></div></td><td>{edge ? <div className="data-value"><strong>{edge.length.toFixed(1)} m</strong><span>OSM-Geometrie</span></div> : <span className="data-missing">Keine OSM-Kante zugeordnet</span>}</td><td>{data?.net_construction_length_m != null ? <div className="data-value"><strong>{data.net_construction_length_m.toFixed(1)} m</strong><span>DB InfraGO Stationsausstattung</span></div> : <span className="data-missing">Bei DB InfraGO nicht geliefert</span>}</td><td>{data?.usable_length_m != null ? <div className="data-value"><strong>{data.usable_length_m.toFixed(1)} m</strong><span>RINF {data.rinf_platform_id || track}{data.rinf_platform_id && data.rinf_platform_id !== track ? ` → DB Gleis ${track}` : ''}</span>{data.rinf_track_id ? <span>Track-ID {data.rinf_track_id} · {data.mapping_confidence === 'confirmed' ? 'bestätigt' : data.mapping_confidence === 'derived' ? 'eindeutig abgeleitet' : 'nicht zugeordnet'}</span> : null}</div> : <span className="data-missing">In RINF nicht zugeordnet</span>}</td><td>{edge && start ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'start')}><strong>{start.lat.toFixed(6)}, {start.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td><td>{edge && end ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'end')}><strong>{end.lat.toFixed(6)}, {end.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td></tr>;
+            return <tr key={`${track}-${edge?.id ?? 'db'}`}><td><div className="data-value"><span className="track-pill">Gleis {track}</span>{edge?.trackSource === 'ref' ? <span>OSM ref={track} · {edge.osmType === 'way' ? 'Weg' : 'Knoten'} {edge.osmId}</span> : edge?.trackSource === 'local_ref' ? <span>OSM local_ref={track}</span> : null}</div></td><td><div className="data-value"><strong>{data?.platform_height_mm != null ? `${data.platform_height_mm} mm` : edge?.height ? `${Number(edge.height) * 1000} mm` : 'Nicht geliefert'}</strong><span>{data?.platform_height_mm != null ? 'DB InfraGO' : 'OpenStreetMap'}</span></div></td><td>{edge ? <div className="data-value"><strong>{edge.length.toFixed(1)} m</strong><span>OSM-Geometrie</span></div> : <span className="data-missing">Keine OSM-Kante zugeordnet</span>}</td><td>{data?.net_construction_length_m != null ? <div className="data-value"><strong>{data.net_construction_length_m.toFixed(1)} m</strong><span>DB InfraGO Stationsausstattung</span></div> : <span className="data-missing">Bei DB InfraGO nicht geliefert</span>}</td><td>{data?.usable_length_m != null ? <div className="data-value"><strong>{data.usable_length_m.toFixed(1)} m</strong><span>RINF {data.rinf_platform_id || track}{data.rinf_platform_id && data.rinf_platform_id !== track ? ` → DB Gleis ${track}` : ''}</span>{data.rinf_track_id ? <span>Track-ID {data.rinf_track_id} · {data.mapping_confidence === 'confirmed' ? 'bestätigt' : data.mapping_confidence === 'derived' ? 'eindeutig abgeleitet' : 'nicht zugeordnet'}</span> : null}</div> : <span className="data-missing">In RINF nicht zugeordnet</span>}</td><td>{edge && start ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'start')}><strong>{start.lat.toFixed(6)}, {start.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td><td>{edge && end ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'end')}><strong>{end.lat.toFixed(6)}, {end.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td></tr>;
           })}{!loading && !platformRows.length ? <tr><td colSpan={7}><span className="data-missing">Keine Bahnsteigdaten in DB InfraGO, RINF oder OSM gefunden.</span></td></tr> : null}</tbody>
         </table>
       </div>
