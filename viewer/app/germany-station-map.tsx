@@ -362,6 +362,12 @@ export function SelectedStationMap({
     const next = reviewEndpoints[(reviewIndex + direction + reviewEndpoints.length) % reviewEndpoints.length];
     focusEndpoint(next.edge, next.endpoint);
   };
+  const startPlatformReview = () => {
+    if (!reviewEndpoints.length) return;
+    const next = reviewEndpoints.find((item) => !endpointReviews[item.key]) ?? reviewEndpoints[0];
+    focusEndpoint(next.edge, next.endpoint);
+  };
+  const reviewedEndpointCount = reviewEndpoints.filter((item) => Boolean(endpointReviews[item.key])).length;
   const rateEndpoint = (status: 'correct' | 'none') => {
     if (!currentReview) return;
     setEndpointReviews((current) => ({ ...current, [currentReview.key]: status }));
@@ -442,7 +448,7 @@ export function SelectedStationMap({
       </section>
       <div className="platform-check-panel generic-platform-check">
         <div><strong>Bahnsteigdaten und Plausibilitätscheck</strong><span>OSM-Baulänge wird wie in Friedberg gegen die DB-Nettobaulänge geprüft; Anfang und Ende bleiben unabhängig prüfbar.</span></div>
-        <div className="comparison-summary"><span className="comparison-low">{lengthComparisons.filter((item) => item.level === 'low').length} geringe</span><span className="comparison-check">{lengthComparisons.filter((item) => item.level === 'check').length} prüfen</span><span className="comparison-high">{lengthComparisons.filter((item) => item.level === 'high').length} auffällig</span></div>
+        <div className="generic-check-actions"><div className="comparison-summary"><span className="comparison-low">{lengthComparisons.filter((item) => item.level === 'low').length} geringe</span><span className="comparison-check">{lengthComparisons.filter((item) => item.level === 'check').length} prüfen</span><span className="comparison-high">{lengthComparisons.filter((item) => item.level === 'high').length} auffällig</span></div><button type="button" className={reviewKey ? 'platform-check-switch platform-check-switch-on' : 'platform-check-switch'} onClick={startPlatformReview} disabled={!reviewEndpoints.length}><span aria-hidden="true"/>{reviewKey ? `Nächsten offenen Endpunkt prüfen (${reviewedEndpointCount}/${reviewEndpoints.length})` : 'Bahnsteigkanten prüfen'}</button></div>
       </div>
       <div className="generic-platform-scroll">
         <table className="platform-data-table">
