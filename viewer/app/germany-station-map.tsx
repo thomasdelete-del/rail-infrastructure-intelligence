@@ -413,7 +413,7 @@ export function SelectedStationMap({
           </div>
         </div>
         <button type="button" onClick={onBack}>
-          Zu Friedberg (Hess)
+          Zur Deutschlandkarte
         </button>
       </div>
       <div
@@ -542,7 +542,12 @@ export function GermanyStationMap({
       })
       .then((data) => {
         setStaDaStations(data.stations);
-        setMessage(`${data.stations.length.toLocaleString('de-DE')} DB-Stationen sind für die Sofortsuche geladen.`);
+        const mapped = data.stations.flatMap((candidate) => {
+          const latitude = Number(candidate.latitude), longitude = Number(candidate.longitude);
+          return Number.isFinite(latitude) && Number.isFinite(longitude) ? [{ id: `stada-${candidate.station_number}`, name: candidate.name, latitude, longitude }] : [];
+        });
+        setStations(mapped.length ? mapped : MAJOR);
+        setMessage(`${mapped.length.toLocaleString('de-DE')} DB-Bahnhöfe werden auf der Karte angezeigt.`);
       })
       .catch((error: unknown) => {
         if ((error as { name?: string }).name !== 'AbortError') setMessage('Die DB-Stationsliste konnte nicht geladen werden.');
@@ -554,7 +559,7 @@ export function GermanyStationMap({
     if (!el.current || map.current) return;
     void import('leaflet').then((L) => {
       if (!el.current || map.current) return;
-      map.current = L.map(el.current, { minZoom: 5, maxZoom: 18 }).setView(
+      map.current = L.map(el.current, { minZoom: 5, maxZoom: 18, preferCanvas: true }).setView(
         [51.15, 10.45],
         6,
       );
@@ -577,10 +582,10 @@ export function GermanyStationMap({
       stations.forEach((s) => {
         const safeName = escapeHtml(s.name);
         const marker = L.circleMarker([s.latitude, s.longitude], {
-          radius: s.available ? 9 : 6,
+          radius: 5,
           color: '#fff',
           weight: 2,
-          fillColor: s.available ? '#f5a623' : '#0b6b8a',
+          fillColor: '#0b6b8a',
           fillOpacity: 1,
         })
           .addTo(layer.current!)
@@ -592,11 +597,7 @@ export function GermanyStationMap({
           });
           marker.openPopup();
           onSelect(s);
-          setMessage(
-            s.available
-              ? `${s.name}: Viewer wird geöffnet.`
-              : `${s.name} ausgewählt. Die Datenanbindung folgt.`,
-          );
+          setMessage(`${s.name}: Stationsansicht wird geöffnet.`);
         });
       });
     });
@@ -608,7 +609,6 @@ export function GermanyStationMap({
       return;
     }
     const station: Station = { id: `stada-${candidate.station_number}`, name: candidate.name, latitude, longitude };
-    setStations([station]);
     setShowResults(false);
     map.current?.setView([latitude, longitude], 16, { animate: true });
     onSelect(station);
