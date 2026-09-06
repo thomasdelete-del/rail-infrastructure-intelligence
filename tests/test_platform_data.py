@@ -16,6 +16,12 @@ def test_parses_station_equipment_index():
     assert parse_equipment_index(html)["beienheim"].endswith("/Beienheim-12670896")
 
 
+def test_index_preserves_compound_db_station_name_for_unique_suffix_matching():
+    html = '<a href="/web/x/stationsausstattung/Rotenburg-an-der-Fulda-Lispenhausen-12673986"><h3>Rotenburg an der Fulda-Lispenhausen</h3></a>'
+    links = parse_equipment_index(html)
+    assert "rotenburg an der fulda-lispenhausen" in links
+
+
 def test_parses_rinf_usable_lengths():
     data = {"results": {"bindings": [{
         "uopid": {"value": "DE0FBEI"}, "platformId": {"value": "1"},

@@ -123,7 +123,13 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
 }} ORDER BY ?platformId'''
     async with httpx.AsyncClient(timeout=90, follow_redirects=True, headers={"User-Agent": "rail-infrastructure-intelligence/1.4"}) as client:
         index = await _equipment_index(client)
-        page_url = index.get(_normalize(name))
+        normalized_name = _normalize(name)
+        page_url = index.get(normalized_name)
+        if not page_url:
+            contained = [url for indexed_name, url in index.items()
+                         if normalized_name in indexed_name.split() or indexed_name.endswith(normalized_name)]
+            if len(set(contained)) == 1:
+                page_url = contained[0]
         db_request = client.get(page_url) if page_url else None
         rinf_request = client.get(RINF_ENDPOINT, params={"query": query}, headers={"Accept": "application/sparql-results+json"})
         if db_request:
