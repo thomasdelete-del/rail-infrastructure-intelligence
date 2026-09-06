@@ -74,7 +74,15 @@ export default function Home() {
 
   useEffect(() => { load(); }, []);
   useEffect(() => {
-    try { setCoordinateDrafts(JSON.parse(localStorage.getItem('friedberg-coordinate-drafts') ?? '{}') as CoordinateDrafts); } catch { setCoordinateDrafts({}); }
+    try {
+      const drafts = JSON.parse(localStorage.getItem('friedberg-coordinate-drafts') ?? '{}') as CoordinateDrafts;
+      if (!localStorage.getItem('friedberg-coordinate-assignment-fix-2026-09-06')) {
+        delete drafts['FRI-PE-7:start'];
+        localStorage.setItem('friedberg-coordinate-drafts', JSON.stringify(drafts));
+        localStorage.setItem('friedberg-coordinate-assignment-fix-2026-09-06', 'done');
+      }
+      setCoordinateDrafts(drafts);
+    } catch { setCoordinateDrafts({}); }
   }, []);
   const platforms = useMemo(() => {
     if (!inventory) return [];

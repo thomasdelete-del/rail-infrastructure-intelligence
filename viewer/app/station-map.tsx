@@ -251,15 +251,10 @@ export function StationMap({ points, focusObjectKey, coordinateEdit, aerialRevie
       const proposed: Array<[number, number] | null> = [analysis?.candidate_start ? [analysis.candidate_start.latitude, analysis.candidate_start.longitude] : null, analysis?.candidate_end ? [analysis.candidate_end.latitude, analysis.candidate_end.longitude] : null];
       if (aerialReviewRequest.coordinateType) {
         const endpointIndex = aerialReviewRequest.coordinateType === 'start' ? 0 : 1;
-        if (proposed[0] && proposed[1]) {
-          L.polyline([proposed[0], proposed[1]], { color: '#00a6c7', weight: 6, opacity: .9 }).addTo(reviewLayerRef.current);
-          proposed.forEach((coordinate, index) => {
-            if (!coordinate) return;
-            L.circleMarker(coordinate, { radius: index === endpointIndex ? 10 : 7, color: '#fff', weight: 3, fillColor: '#00a6c7', fillOpacity: 1 }).addTo(reviewLayerRef.current!);
-          });
-        }
+        const selectedCandidate = proposed[endpointIndex];
+        if (selectedCandidate) L.circleMarker(selectedCandidate, { radius: 10, color: '#fff', weight: 3, fillColor: '#00a6c7', fillOpacity: 1 }).addTo(reviewLayerRef.current);
         L.circleMarker(osmCoordinates[endpointIndex], { radius: 7, color: '#f59e0b', weight: 3, fillColor: '#fff', fillOpacity: .2, dashArray: '3 3' }).addTo(reviewLayerRef.current);
-        const target = proposed[endpointIndex] ?? osmCoordinates[endpointIndex];
+        const target = selectedCandidate ?? osmCoordinates[endpointIndex];
         mapRef.current.setView(target, 21, { animate: false });
         return;
       }

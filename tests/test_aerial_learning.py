@@ -35,6 +35,14 @@ def test_latest_manual_correction_wins(monkeypatch):
     assert aerial_learning.latest_correction("5", "end") is None
 
 
+def test_clear_marker_supersedes_an_incorrect_coordinate(monkeypatch):
+    monkeypatch.setattr(aerial_learning, "training_samples", lambda: [
+        {"track": "7", "endpoint": "start", "corrected_coordinate": {"latitude": 50.3, "longitude": 8.7}},
+        {"track": "7", "endpoint": "start", "clear_corrected_coordinate": True},
+    ])
+    assert aerial_learning.latest_correction("7", "start") is None
+
+
 def test_accepted_endpoint_is_stored_as_separate_confirmed_observation(monkeypatch):
     captured = []
     monkeypatch.setattr(aerial_learning, "store_observations", lambda items: captured.extend(items) or len(items))

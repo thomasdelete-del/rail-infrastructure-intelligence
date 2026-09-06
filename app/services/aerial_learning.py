@@ -21,12 +21,14 @@ def feature_vector(features: dict[str, Any]) -> np.ndarray:
 
 def store_training_sample(track: str, endpoint: str, accepted: bool, features: dict[str, Any],
                           corrected_coordinate: dict[str, float] | None = None,
-                          confirmed_coordinate: dict[str, float] | None = None) -> int:
+                          confirmed_coordinate: dict[str, float] | None = None,
+                          clear_corrected_coordinate: bool = False) -> int:
     observations = [{
         "object_key": f"FRI-OSM-platform-edge-{track}", "object_type": "platform_edge",
         "attribute": ATTRIBUTE,
         "value": {"track": track, "endpoint": endpoint, "accepted": accepted, "features": features,
-                  "corrected_coordinate": corrected_coordinate},
+                  "corrected_coordinate": corrected_coordinate,
+                  "clear_corrected_coordinate": clear_corrected_coordinate},
         "source_key": SOURCE_KEY, "source_publisher": "Manuelle Luftbildprüfung",
         "source_type": "human_review", "quality_class": "B", "method": "supervised_label",
         "is_derived": False,
@@ -52,8 +54,12 @@ def training_samples() -> list[dict[str, Any]]:
 
 def latest_correction(track: str, endpoint: str) -> dict[str, float] | None:
     for sample in reversed(training_samples()):
+        if sample.get("track") != track or sample.get("endpoint") != endpoint:
+            continue
+        if sample.get("clear_corrected_coordinate"):
+            return None
         coordinate = sample.get("corrected_coordinate")
-        if sample.get("track") == track and sample.get("endpoint") == endpoint and isinstance(coordinate, dict):
+        if isinstance(coordinate, dict):
             return {"latitude": float(coordinate["latitude"]), "longitude": float(coordinate["longitude"])}
     return None
 
