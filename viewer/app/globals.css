@@ -109,6 +109,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .selected-station-map-wrap { position: relative; }
 .selected-station-map { height: 520px; border-top: 1px solid var(--border); background: #dce5e8; }
 .generic-map-controls { top: 14px; right: 14px; border: 0; padding: 7px; background: rgb(255 255 255 / 94%); }
+.endpoint-corridor-error { position: relative; z-index: 520; width: max-content; max-width: calc(100% - 28px); margin: -116px 14px 72px auto; border: 2px solid #d54532; border-radius: 7px; background: #fff0ed; padding: 8px 12px; color: #9f2d20; font-size: .78rem; font-weight: 750; }
 .generic-station-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid var(--border); }
 .generic-station-metrics div { display: flex; flex-direction: column; gap: 2px; border-right: 1px solid var(--border); padding: 14px 20px; }
 .generic-station-metrics div:last-child { border-right: 0; }

@@ -77,6 +77,21 @@ const distance = (a: { lat: number; lon: number }, b: { lat: number; lon: number
 const geometryLength = (geometry: Array<{ lat: number; lon: number }>) =>
   geometry.slice(1).reduce((sum, point, index) => sum + distance(geometry[index], point), 0);
 
+const lateralDistanceToGeometry = (point: { lat: number; lon: number }, geometry: Array<{ lat: number; lon: number }>) => {
+  const latitudeScale = 111_320;
+  const longitudeScale = latitudeScale * Math.cos(point.lat * Math.PI / 180);
+  return geometry.slice(1).reduce((nearest, end, index) => {
+    const start = geometry[index];
+    const segmentX = (end.lon - start.lon) * longitudeScale;
+    const segmentY = (end.lat - start.lat) * latitudeScale;
+    const pointX = (point.lon - start.lon) * longitudeScale;
+    const pointY = (point.lat - start.lat) * latitudeScale;
+    const segmentLength = Math.hypot(segmentX, segmentY);
+    if (!segmentLength) return nearest;
+    return Math.min(nearest, Math.abs(segmentX * pointY - segmentY * pointX) / segmentLength);
+  }, Number.POSITIVE_INFINITY);
+};
+
 const platformAxis = (geometry: Array<{ lat: number; lon: number }>) => {
   let best: [{ lat: number; lon: number }, { lat: number; lon: number }, number] | null = null;
   geometry.forEach((start, startIndex) => geometry.slice(startIndex + 1).forEach((end) => {
@@ -126,6 +141,7 @@ export function SelectedStationMap({
   const [aerialResults, setAerialResults] = useState<Record<string, GenericAerialAnalysis>>({});
   const [aerialChecksRunning, setAerialChecksRunning] = useState(false);
   const [correctionTarget, setCorrectionTarget] = useState<{ edgeId: string; endpoint: 'start' | 'end'; track: string } | null>(null);
+  const [correctionError, setCorrectionError] = useState<string | null>(null);
   const authoritativeName = identity?.name || station.name;
   const displayName = /bahnhof$/i.test(authoritativeName.trim())
     ? authoritativeName
@@ -144,6 +160,7 @@ export function SelectedStationMap({
   useEffect(() => { localStorage.setItem(`station-endpoint-reviews:${station.id}`, JSON.stringify(endpointReviews)); }, [endpointReviews, station.id]);
   const focusEndpoint = (edge: PlatformEdge, endpoint: 'start' | 'end') => {
     const point = endpoint === 'start' ? edge.geometry[0] : edge.geometry.at(-1);
+    setCorrectionError(null);
     setReviewKey(`${edge.id}:${endpoint}`);
     setImagery(officialImageryAvailable ? 'official' : 'satellite');
     if (point) mapRef.current?.setView([point.lat, point.lon], 21, { animate: false });
@@ -159,6 +176,12 @@ export function SelectedStationMap({
     const map = mapRef.current;
     const handleClick = (event: { latlng: { lat: number; lng: number } }) => {
       const coordinate = { lat: event.latlng.lat, lon: event.latlng.lng };
+      const targetEdge = platformEdges.find((edge) => edge.id === correctionTarget.edgeId);
+      if (!targetEdge || lateralDistanceToGeometry(coordinate, targetEdge.geometry) > 12) {
+        setCorrectionError(`Punkt liegt nicht am Korridor von Gleis ${correctionTarget.track}.`);
+        return;
+      }
+      setCorrectionError(null);
       setPlatformEdges((current) => current.map((edge) => {
         if (edge.id !== correctionTarget.edgeId) return edge;
         const geometry = [...edge.geometry];
@@ -173,9 +196,9 @@ export function SelectedStationMap({
       void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${authoritativeName}:${correctionTarget.track}`, endpoint: correctionTarget.endpoint, accepted: false, features: features ?? {}, corrected_coordinate: { latitude: coordinate.lat, longitude: coordinate.lon } }) });
       setCorrectionTarget(null);
     };
-    map.once('click', handleClick);
+    map.on('click', handleClick);
     return () => { map.off('click', handleClick); };
-  }, [aerialResults, authoritativeName, correctionTarget]);
+  }, [aerialResults, authoritativeName, correctionTarget, platformEdges]);
   useEffect(() => {
     setIdentity(null);
     setDbSources({});
@@ -468,7 +491,10 @@ export function SelectedStationMap({
     const point = currentReview.endpoint === 'start' ? currentReview.edge.geometry[0] : currentReview.edge.geometry.at(-1)!;
     const features = currentReview.endpoint === 'start' ? currentAerial?.start_features : currentAerial?.end_features;
     void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${authoritativeName}:${currentReview.edge.track}`, endpoint: currentReview.endpoint, accepted: status === 'correct', features: features ?? {}, confirmed_coordinate: status === 'correct' ? { latitude: point.lat, longitude: point.lon } : null }) });
-    if (status === 'none') setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track });
+    if (status === 'none') {
+      setCorrectionError(null);
+      setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track });
+    }
   };
   const applyAerialSuggestion = () => {
     if (!currentReview || !currentAerial?.candidate_start || !currentAerial.candidate_end) return;
@@ -543,6 +569,7 @@ export function SelectedStationMap({
           <button type="button" className="map-icon-button" onClick={() => mapRef.current?.setView([station.latitude, station.longitude], 17, { animate: false })} aria-label="Bahnhof zentrieren"><MapPin size={17}/></button>
         </div>
       </div>
+      {correctionError ? <div className="endpoint-corridor-error" role="alert">{correctionError} Anfang und Ende müssen zur selben Bahnsteigkante gehören.</div> : null}
       {currentReview ? <div className="endpoint-review-nav generic-endpoint-review"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>Gleis {currentReview.edge.track} · {currentReview.endpoint === 'start' ? 'Anfang' : 'Ende'}</strong><span>{correctionTarget ? 'Richtigen Abschluss in der Karte anklicken' : endpointReviews[currentReview.key] === 'correct' ? 'Abschluss bestätigt' : endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : endpointReviews[currentReview.key] === 'none' ? 'Kein Abschluss – Korrektur erwartet' : currentAerial?.status === 'plausible' ? `Luftbild plausibel · ${Math.round(currentAerial.confidence * 100)}%` : currentAerial?.maximum_endpoint_shift_m != null ? `Abweichung ${currentAerial.maximum_endpoint_shift_m.toFixed(1)} m · ${Math.round(currentAerial.confidence * 100)}%` : aerialChecksRunning ? 'Amtliches Luftbild wird ausgewertet …' : currentAerial?.reason ?? 'Noch nicht geprüft'}</span>{currentAerial?.candidate_length_m != null ? <small>Erkannte Länge: {currentAerial.candidate_length_m.toFixed(1)} m</small> : null}<div className="endpoint-learning-actions"><button type="button" className={endpointReviews[currentReview.key] === 'correct' ? 'learning-correct-active' : ''} onClick={() => rateEndpoint('correct')}>Abschluss korrekt</button><button type="button" className={endpointReviews[currentReview.key] === 'none' ? 'learning-wrong-active' : ''} onClick={() => rateEndpoint('none')}>Kein Abschluss</button><button type="button" className={endpointReviews[currentReview.key] === 'corrected' ? 'learning-corrected-active' : ''} onClick={() => setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track })}>{endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : 'Richtigen Abschluss setzen'}</button></div></div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
       {currentReview && currentAerial?.candidate_start && currentAerial.candidate_end && currentAerial.status !== 'plausible' ? <button type="button" className="generic-aerial-apply" onClick={applyAerialSuggestion}>Luftbildvorschlag als beide Prüfpunkte übernehmen</button> : null}
       <div className="generic-station-metrics">
