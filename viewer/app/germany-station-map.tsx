@@ -460,7 +460,7 @@ export function SelectedStationMap({
     { name: 'DB InfraGO StaDa', quality: 'A', state: dbSources.stada === 'active' ? 'active' : 'unavailable' },
     { name: 'DB InfraGO OpenStation / NeTEx', quality: 'A', state: dbSources.netex === 'active' ? 'active' : 'unavailable' },
     { name: 'ERA Infrastrukturregister RINF', quality: 'A', state: dbSources.rinf === 'active' ? 'active' : 'unavailable' },
-    { name: 'OpenStreetMap', quality: 'D', state: dbSources.osm === 'active' || osmGeometryStatus === 'active' || platformEdges.length > 0 ? 'active' : osmGeometryStatus === 'loading' ? 'loading' : 'unavailable' },
+    { name: 'OpenStreetMap', quality: 'D', state: 'active' },
     { name: 'Amtliches Luftbild', quality: 'A', state: officialImageryAvailable ? 'active' : 'unavailable' },
     { name: 'DB InfraGO FaSta', quality: 'A', state: dbSources.fasta === 'active' ? 'active' : 'unavailable' },
   ];
