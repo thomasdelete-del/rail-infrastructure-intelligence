@@ -117,6 +117,7 @@ export function SelectedStationMap({
   const [inventoryType, setInventoryType] = useState('all');
   const [selectedObjectKey, setSelectedObjectKey] = useState<string | null>(null);
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
+  const [imageryOpacity, setImageryOpacity] = useState(82);
   const [loading, setLoading] = useState(true);
   const [osmGeometryStatus, setOsmGeometryStatus] = useState<'loading' | 'active' | 'unavailable'>('loading');
   const [reviewKey, setReviewKey] = useState<string | null>(null);
@@ -338,9 +339,10 @@ export function SelectedStationMap({
     };
   }, [displayName, officialImageryAvailable, station]);
   useEffect(() => {
-    satelliteRef.current?.setOpacity(imagery === 'satellite' ? 1 : 0);
-    officialRef.current?.setOpacity(imagery === 'official' ? 1 : 0);
-  }, [imagery]);
+    const opacity = imageryOpacity / 100;
+    satelliteRef.current?.setOpacity(imagery === 'satellite' ? opacity : 0);
+    officialRef.current?.setOpacity(imagery === 'official' ? opacity : 0);
+  }, [imagery, imageryOpacity]);
   const platformRows = useMemo(() => {
     const matched = new Set<string>();
     const rows = authoritativePlatforms.map((data) => {
@@ -501,17 +503,21 @@ export function SelectedStationMap({
           Zur Deutschlandkarte
         </button>
       </div>
-      <div
-        ref={el}
-        className="selected-station-map"
-        aria-label={`Lageplan ${displayName}`}
-      />
+      <div className="selected-station-map-wrap">
+        <div
+          ref={el}
+          className="selected-station-map"
+          aria-label={`Lageplan ${displayName}`}
+        />
+        <div className="generic-map-controls map-controls" aria-label="Kartenebenen">
+          <button type="button" className={imagery === 'satellite' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'satellite' ? 'none' : 'satellite')}><Satellite size={16}/><span>Satellit</span></button>
+          {officialImageryAvailable ? <button type="button" className={imagery === 'official' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'official' ? 'none' : 'official')}><Layers3 size={16}/><span>Amtliches Luftbild</span></button> : null}
+          {imagery !== 'none' ? <label className="opacity-control"><span>Deckkraft</span><input type="range" min="20" max="100" step="5" value={imageryOpacity} onChange={(event) => setImageryOpacity(Number(event.target.value))} aria-label="Deckkraft des Luftbilds"/><strong>{imageryOpacity}%</strong></label> : null}
+          <button type="button" className="map-icon-button" onClick={() => mapRef.current?.setView([station.latitude, station.longitude], 17, { animate: false })} aria-label="Bahnhof zentrieren"><MapPin size={17}/></button>
+        </div>
+      </div>
       {currentReview ? <div className="endpoint-review-nav generic-endpoint-review"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>Gleis {currentReview.edge.track} · {currentReview.endpoint === 'start' ? 'Anfang' : 'Ende'}</strong><span>{correctionTarget ? 'Richtigen Abschluss in der Karte anklicken' : endpointReviews[currentReview.key] === 'correct' ? 'Abschluss bestätigt' : endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : endpointReviews[currentReview.key] === 'none' ? 'Kein Abschluss – Korrektur erwartet' : currentAerial?.status === 'plausible' ? `Luftbild plausibel · ${Math.round(currentAerial.confidence * 100)}%` : currentAerial?.maximum_endpoint_shift_m != null ? `Abweichung ${currentAerial.maximum_endpoint_shift_m.toFixed(1)} m · ${Math.round(currentAerial.confidence * 100)}%` : aerialChecksRunning ? 'Amtliches Luftbild wird ausgewertet …' : currentAerial?.reason ?? 'Noch nicht geprüft'}</span>{currentAerial?.candidate_length_m != null ? <small>Erkannte Länge: {currentAerial.candidate_length_m.toFixed(1)} m</small> : null}<div className="endpoint-learning-actions"><button type="button" className={endpointReviews[currentReview.key] === 'correct' ? 'learning-correct-active' : ''} onClick={() => rateEndpoint('correct')}>Abschluss korrekt</button><button type="button" className={endpointReviews[currentReview.key] === 'none' ? 'learning-wrong-active' : ''} onClick={() => rateEndpoint('none')}>Kein Abschluss</button><button type="button" className={endpointReviews[currentReview.key] === 'corrected' ? 'learning-corrected-active' : ''} onClick={() => setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track })}>{endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : 'Richtigen Abschluss setzen'}</button></div></div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
       {currentReview && currentAerial?.candidate_start && currentAerial.candidate_end && currentAerial.status !== 'plausible' ? <button type="button" className="generic-aerial-apply" onClick={applyAerialSuggestion}>Luftbildvorschlag als beide Prüfpunkte übernehmen</button> : null}
-      <div className="generic-map-controls" aria-label="Kartenebenen">
-        <button type="button" className={imagery === 'satellite' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'satellite' ? 'none' : 'satellite')}><Satellite size={16}/>Satellit</button>
-        {officialImageryAvailable ? <button type="button" className={imagery === 'official' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'official' ? 'none' : 'official')}><Layers3 size={16}/>Amtliches Luftbild</button> : null}
-      </div>
       <div className="generic-station-metrics">
         <div><strong>{platformRows.length}</strong><span>Bahnsteigkanten</span></div>
         <div><strong>{counts.entrances}</strong><span>Zugänge</span></div>
