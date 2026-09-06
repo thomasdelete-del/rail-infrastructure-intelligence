@@ -135,6 +135,8 @@ export function SelectedStationMap({
   const [imageryOpacity, setImageryOpacity] = useState(82);
   const [loading, setLoading] = useState(true);
   const [osmGeometryStatus, setOsmGeometryStatus] = useState<'loading' | 'active' | 'unavailable'>('loading');
+  const [osmBaseMapStatus, setOsmBaseMapStatus] = useState<'loading' | 'active' | 'unavailable'>('loading');
+  const [officialImageryStatus, setOfficialImageryStatus] = useState<'loading' | 'active' | 'unavailable'>('loading');
   const [reviewKey, setReviewKey] = useState<string | null>(null);
   const [endpointReviews, setEndpointReviews] = useState<Record<string, 'correct' | 'none' | 'corrected'>>({});
   const [osmConfirmed, setOsmConfirmed] = useState<Record<string, boolean>>({});
@@ -212,7 +214,7 @@ export function SelectedStationMap({
     void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
       .then(async (raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); if (value.ril) { const platformParameters = new URLSearchParams({ name: value.matched_name || station.name, ril: value.ril }); const response = await fetch(`${API}/stations/platform-data?${platformParameters}`, { cache: 'no-store', signal: controller.signal }); if (response.ok) { const data = await response.json() as { platforms: AuthoritativePlatform[]; status: { era_rinf?: string } }; setAuthoritativePlatforms(data.platforms); setDbSources((current) => ({ ...current, rinf: data.status.era_rinf })); } } })
-      .catch((error: Error) => { if (error.name !== 'AbortError') setIdentity(null); });
+      .catch((error: Error) => { if (error.name !== 'AbortError') { setIdentity(null); setDbSources({ stada: 'unavailable', netex: 'unavailable', rinf: 'unavailable', osm: 'unavailable', fasta: 'unavailable' }); } });
     return () => controller.abort();
   }, [station]);
   useEffect(() => {
@@ -228,6 +230,8 @@ export function SelectedStationMap({
     if (!el.current) return;
     setLoading(true);
     setOsmGeometryStatus('loading');
+    setOsmBaseMapStatus('loading');
+    setOfficialImageryStatus(officialImageryAvailable ? 'loading' : 'unavailable');
     setCounts({ platforms: 0, entrances: 0, equipment: 0 });
     setPlatformEdges([]);
     setImagery('none');
@@ -239,21 +243,29 @@ export function SelectedStationMap({
         [station.latitude, station.longitude],
         17,
       );
-      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      const osmBaseLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxNativeZoom: 19,
         maxZoom: 24,
         attribution: '&copy; OpenStreetMap-Mitwirkende',
-      }).addTo(instance);
+      });
+      osmBaseLayer.on('load', () => { if (!disposed) setOsmBaseMapStatus('active'); });
+      osmBaseLayer.on('tileerror', () => { if (!disposed) setOsmBaseMapStatus((current) => current === 'active' ? current : 'unavailable'); });
+      osmBaseLayer.addTo(instance);
       mapRef.current = instance;
       reviewLayerRef.current = L.layerGroup().addTo(instance);
       satelliteRef.current = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         maxNativeZoom: 19, maxZoom: 24, opacity: 0,
         attribution: 'Satellitenbild &copy; Esri, Maxar, Earthstar Geographics und weitere',
       }).addTo(instance);
-      if (officialImageryAvailable) officialRef.current = L.tileLayer.wms('https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows', {
-        layers: 'he_dop20_rgb', format: 'image/png', transparent: true, version: '1.1.1', maxZoom: 24, opacity: 0,
-        attribution: 'Luftbild: &copy; Hessische Verwaltung für Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
-      }).addTo(instance);
+      if (officialImageryAvailable) {
+        officialRef.current = L.tileLayer.wms('https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows', {
+          layers: 'he_dop20_rgb', format: 'image/png', transparent: true, version: '1.1.1', maxZoom: 24, opacity: 0,
+          attribution: 'Luftbild: &copy; Hessische Verwaltung für Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
+        });
+        officialRef.current.on('load', () => { if (!disposed) setOfficialImageryStatus('active'); });
+        officialRef.current.on('tileerror', () => { if (!disposed) setOfficialImageryStatus((current) => current === 'active' ? current : 'unavailable'); });
+        officialRef.current.addTo(instance);
+      }
       L.circleMarker([station.latitude, station.longitude], {
         radius: 10,
         color: '#fff',
@@ -510,12 +522,12 @@ export function SelectedStationMap({
     }));
   };
   const sourceEntries = [
-    { name: 'DB InfraGO StaDa', quality: 'A', state: dbSources.stada === 'active' ? 'active' : 'unavailable' },
-    { name: 'DB InfraGO OpenStation / NeTEx', quality: 'A', state: dbSources.netex === 'active' ? 'active' : 'unavailable' },
-    { name: 'ERA Infrastrukturregister RINF', quality: 'A', state: dbSources.rinf === 'active' ? 'active' : 'unavailable' },
-    { name: 'OpenStreetMap', quality: 'D', state: 'active' },
-    { name: 'Amtliches Luftbild', quality: 'A', state: officialImageryAvailable ? 'active' : 'unavailable' },
-    { name: 'DB InfraGO FaSta', quality: 'A', state: dbSources.fasta === 'active' ? 'active' : 'unavailable' },
+    { name: 'DB InfraGO StaDa', quality: 'A', state: dbSources.stada === undefined ? 'loading' : dbSources.stada === 'active' ? 'active' : 'unavailable' },
+    { name: 'DB InfraGO OpenStation / NeTEx', quality: 'A', state: dbSources.netex === undefined ? 'loading' : dbSources.netex === 'active' ? 'active' : 'unavailable' },
+    { name: 'ERA Infrastrukturregister RINF', quality: 'A', state: dbSources.rinf === undefined ? 'loading' : dbSources.rinf === 'active' ? 'active' : 'unavailable' },
+    { name: 'OpenStreetMap', quality: 'D', state: osmBaseMapStatus },
+    { name: 'Amtliches Luftbild', quality: 'A', state: officialImageryStatus },
+    { name: 'DB InfraGO FaSta', quality: 'A', state: dbSources.fasta === undefined ? 'loading' : dbSources.fasta === 'active' ? 'active' : 'unavailable' },
   ];
   const inventoryObjects = inventory?.objects ?? [];
   const inventoryCounts = Object.fromEntries(['platform', 'platform_edge', 'entrance', 'equipment'].map((type) => [type, inventoryObjects.filter((item) => item.object_type === type).length]));
