@@ -187,6 +187,10 @@ def aerial_training_feedback(feedback: AerialTrainingFeedback):
                                    feedback.clear_corrected_coordinate)
     return {"stored": stored, "learning": "supervised_online_logistic_regression"}
 
+@app.post("/stations/aerial-analysis/training-feedback")
+def generic_aerial_training_feedback(feedback: AerialTrainingFeedback):
+    return aerial_training_feedback(feedback)
+
 @app.get("/stations/friedberg-hess/change-report/rinf")
 async def rinf_change_report(persist: bool = False):
     return await build_change_report(RINFCollector(), FRIEDBERG["name"], persist=persist)

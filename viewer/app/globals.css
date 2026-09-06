@@ -45,6 +45,19 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .station-picker-results span { font-size: .8rem; font-weight: 750; }
 .station-picker-results small { color: #647985; font-size: .67rem; }
 .station-picker-empty { padding: 12px; color: #647985; font-size: .78rem; }
+.generic-feature-card { margin: 22px 14px 0; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: #fff; box-shadow: 0 2px 5px rgb(7 27 43 / 6%); }
+.generic-feature-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 18px 24px; border-bottom: 1px solid var(--border); }
+.generic-feature-heading h2 { margin: 0; font-size: 1.1rem; }
+.generic-feature-heading p { margin: 5px 0 0; color: #687b86; font-size: .82rem; }
+.generic-feature-heading > strong { color: #19704a; font-size: .78rem; }
+.generic-platform-overview { display: grid; gap: 11px; padding: 20px 24px; }
+.generic-platform-row { display: grid; grid-template-columns: 45px 1fr 80px; gap: 15px; align-items: center; min-height: 70px; padding: 12px 16px; border: 1px solid var(--border); border-radius: 9px; background: #fbfcfd; }
+.generic-platform-row > strong { display: grid; height: 45px; place-items: center; border-radius: 5px; background: #07577b; color: #fff; }
+.generic-platform-row > div > span { display: block; margin-bottom: 8px; color: #60717b; font-size: .8rem; font-weight: 700; }
+.generic-platform-row > div > div { display: flex; align-items: center; gap: 10px; }
+.generic-platform-row small { color: #687b86; }
+.generic-platform-row i { height: 4px; border-radius: 3px; background: #f5a623; }
+.generic-endpoint-review { position: relative; right: auto; bottom: auto; width: max-content; max-width: calc(100% - 28px); margin: -132px 14px 60px auto; }
 .germany-map { height: 390px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); background: #dce5e8; }
 .germany-map-status { display: flex; align-items: center; gap: 9px; padding: 12px 20px; color: #365767; font-size: .82rem; }
 .germany-map-status span { flex: 1; }

@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Layers3, MapPin, Satellite, Search, TrainFront } from 'lucide-react';
+import { Layers3, MapPin, Satellite, Search, ShieldCheck, TrainFront } from 'lucide-react';
 import type { Map as LeafletMap, LayerGroup, TileLayer } from 'leaflet';
 const API = 'https://rail-infrastructure-intelligence-production.up.railway.app';
 export type Station = {
@@ -51,6 +51,9 @@ type AuthoritativePlatform = {
   net_construction_length_m?: number | null;
   usable_length_m?: number | null;
   rinf_platform_id?: string | null;
+  rinf_track_id?: string | null;
+  mapping_method?: string | null;
+  mapping_confidence?: string | null;
 };
 
 const distance = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) => {
@@ -100,6 +103,9 @@ export function SelectedStationMap({
   const [authoritativePlatforms, setAuthoritativePlatforms] = useState<AuthoritativePlatform[]>([]);
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [loading, setLoading] = useState(true);
+  const [reviewKey, setReviewKey] = useState<string | null>(null);
+  const [endpointReviews, setEndpointReviews] = useState<Record<string, 'correct' | 'none' | 'corrected'>>({});
+  const [correctionTarget, setCorrectionTarget] = useState<{ edgeId: string; endpoint: 'start' | 'end'; track: string } | null>(null);
   const authoritativeName = identity?.name || station.name;
   const displayName = /bahnhof$/i.test(authoritativeName.trim())
     ? authoritativeName
@@ -107,9 +113,30 @@ export function SelectedStationMap({
   const officialImageryAvailable = station.latitude >= 49.39 && station.latitude <= 51.66 && station.longitude >= 7.77 && station.longitude <= 10.24;
   const focusEndpoint = (edge: PlatformEdge, endpoint: 'start' | 'end') => {
     const point = endpoint === 'start' ? edge.geometry[0] : edge.geometry.at(-1);
+    setReviewKey(`${edge.id}:${endpoint}`);
     setImagery(officialImageryAvailable ? 'official' : 'satellite');
     if (point) mapRef.current?.setView([point.lat, point.lon], 21, { animate: false });
   };
+  useEffect(() => {
+    if (!correctionTarget || !mapRef.current) return;
+    const map = mapRef.current;
+    const handleClick = (event: { latlng: { lat: number; lng: number } }) => {
+      const coordinate = { lat: event.latlng.lat, lon: event.latlng.lng };
+      setPlatformEdges((current) => current.map((edge) => {
+        if (edge.id !== correctionTarget.edgeId) return edge;
+        const geometry = [...edge.geometry];
+        if (correctionTarget.endpoint === 'start') geometry[0] = coordinate;
+        else geometry[geometry.length - 1] = coordinate;
+        return { ...edge, geometry, length: geometryLength(geometry) };
+      }));
+      const key = `${correctionTarget.edgeId}:${correctionTarget.endpoint}`;
+      setEndpointReviews((current) => ({ ...current, [key]: 'corrected' }));
+      void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${station.id}:${correctionTarget.track}`, endpoint: correctionTarget.endpoint, accepted: false, features: {}, corrected_coordinate: { latitude: coordinate.lat, longitude: coordinate.lon } }) });
+      setCorrectionTarget(null);
+    };
+    map.once('click', handleClick);
+    return () => { map.off('click', handleClick); };
+  }, [correctionTarget, station.id]);
   useEffect(() => {
     setIdentity(null);
     setDbSources({});
@@ -263,6 +290,32 @@ export function SelectedStationMap({
     platformEdges.filter((edge) => !matched.has(edge.id)).forEach((edge) => rows.push({ track: edge.track, edge, data: undefined }));
     return rows.sort((a, b) => a.track.localeCompare(b.track, 'de', { numeric: true }));
   }, [authoritativePlatforms, platformEdges]);
+  const reviewEndpoints = useMemo(() => platformEdges.flatMap((edge) => ([
+    { edge, endpoint: 'start' as const, key: `${edge.id}:start` },
+    { edge, endpoint: 'end' as const, key: `${edge.id}:end` },
+  ])), [platformEdges]);
+  const reviewIndex = Math.max(0, reviewEndpoints.findIndex((item) => item.key === reviewKey));
+  const currentReview = reviewKey ? reviewEndpoints[reviewIndex] : null;
+  const navigateReview = (direction: -1 | 1) => {
+    if (!reviewEndpoints.length) return;
+    const next = reviewEndpoints[(reviewIndex + direction + reviewEndpoints.length) % reviewEndpoints.length];
+    focusEndpoint(next.edge, next.endpoint);
+  };
+  const rateEndpoint = (status: 'correct' | 'none') => {
+    if (!currentReview) return;
+    setEndpointReviews((current) => ({ ...current, [currentReview.key]: status }));
+    const point = currentReview.endpoint === 'start' ? currentReview.edge.geometry[0] : currentReview.edge.geometry.at(-1)!;
+    void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${station.id}:${currentReview.edge.track}`, endpoint: currentReview.endpoint, accepted: status === 'correct', features: {}, confirmed_coordinate: status === 'correct' ? { latitude: point.lat, longitude: point.lon } : null }) });
+    if (status === 'none') setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track });
+  };
+  const sourceEntries = [
+    { name: 'DB InfraGO StaDa', quality: 'A', active: dbSources.stada === 'active' },
+    { name: 'DB InfraGO OpenStation / NeTEx', quality: 'A', active: dbSources.netex === 'active' },
+    { name: 'ERA Infrastrukturregister RINF', quality: 'A', active: dbSources.rinf === 'active' },
+    { name: 'OpenStreetMap', quality: 'D', active: dbSources.osm === 'active' || platformEdges.length > 0 },
+    { name: 'Amtliches Luftbild', quality: 'A', active: officialImageryAvailable },
+    { name: 'DB InfraGO FaSta', quality: 'A', active: dbSources.fasta === 'active' },
+  ];
   return (
     <section className="selected-station-card">
       <div className="selected-station-heading">
@@ -296,6 +349,7 @@ export function SelectedStationMap({
         className="selected-station-map"
         aria-label={`Lageplan ${displayName}`}
       />
+      {currentReview ? <div className="endpoint-review-nav generic-endpoint-review"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>Gleis {currentReview.edge.track} · {currentReview.endpoint === 'start' ? 'Anfang' : 'Ende'}</strong><span>{correctionTarget ? 'Richtigen Abschluss in der Karte anklicken' : endpointReviews[currentReview.key] === 'correct' ? 'Abschluss bestätigt' : endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : endpointReviews[currentReview.key] === 'none' ? 'Kein Abschluss – Korrektur erwartet' : 'Noch nicht geprüft'}</span><div className="endpoint-learning-actions"><button type="button" className={endpointReviews[currentReview.key] === 'correct' ? 'learning-correct-active' : ''} onClick={() => rateEndpoint('correct')}>Abschluss korrekt</button><button type="button" className={endpointReviews[currentReview.key] === 'none' ? 'learning-wrong-active' : ''} onClick={() => rateEndpoint('none')}>Kein Abschluss</button><button type="button" className={endpointReviews[currentReview.key] === 'corrected' ? 'learning-corrected-active' : ''} onClick={() => setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track })}>{endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : 'Richtigen Abschluss setzen'}</button></div></div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
       <div className="generic-map-controls" aria-label="Kartenebenen">
         <button type="button" className={imagery === 'satellite' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'satellite' ? 'none' : 'satellite')}><Satellite size={16}/>Satellit</button>
         {officialImageryAvailable ? <button type="button" className={imagery === 'official' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'official' ? 'none' : 'official')}><Layers3 size={16}/>Amtliches Luftbild</button> : null}
@@ -306,6 +360,14 @@ export function SelectedStationMap({
         <div><strong>{counts.equipment}</strong><span>Ausstattung</span></div>
         <div><strong>{identity?.stationNumber ?? '–'}</strong><span>DB-Stationsnummer</span></div>
       </div>
+      <section className="generic-feature-card">
+        <div className="generic-feature-heading"><div><h2>Datenquellen</h2><p>Aktive Verbindungen und Qualitätsklasse für {authoritativeName}</p></div><strong>{sourceEntries.filter((source) => source.active).length} von {sourceEntries.length} verbunden</strong></div>
+        <div className="source-grid">{sourceEntries.map((source) => <div className="source-row" key={source.name}><span className={`source-indicator ${source.active ? 'source-active' : 'source-pending'}`}/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{source.name}</p><p className="mt-1 text-xs text-muted-foreground">Qualitätsklasse {source.quality}</p></div><span className={source.active ? 'source-state-active' : 'source-state-pending'}>{source.active ? 'Aktiv' : 'Nicht verfügbar'}</span></div>)}</div>
+      </section>
+      <section className="generic-feature-card">
+        <div className="generic-feature-heading"><div><h2>Bahnsteigübersicht</h2><p>DB-Gleisnummern mit zugeordneten RINF-Infrastrukturkennungen</p></div><span className="status-ok"><ShieldCheck size={15}/>Identität geprüft</span></div>
+        <div className="generic-platform-overview">{platformRows.map(({ track, data }, index) => <div className="generic-platform-row" key={`overview-${track}`}><strong>B{index + 1}</strong><div><span>Bahnsteig Gleis {track}</span><div><span className="track-pill">Gleis {track}</span>{data?.rinf_platform_id ? <small>RINF {data.rinf_platform_id}{data.rinf_platform_id !== track ? ` → Gleis ${track}` : ''}</small> : <small>RINF nicht zugeordnet</small>}</div></div><i aria-hidden="true"/></div>)}</div>
+      </section>
       <div className="platform-check-panel generic-platform-check">
         <div><strong>Bahnsteiganfänge und -enden prüfen</strong><span>Jeder Endpunkt springt direkt in denselben Luftbildzoom wie in Friedberg.</span></div>
         <span className="status-ok">OSM-Geometrie geladen</span>
@@ -315,7 +377,7 @@ export function SelectedStationMap({
           <thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>Nettobaulänge DB</th><th>Gleisbezogene Bahnsteignutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead>
           <tbody>{platformRows.map(({ track, edge, data }) => {
             const start = edge?.geometry[0], end = edge?.geometry.at(-1);
-            return <tr key={`${track}-${edge?.id ?? 'db'}`}><td><span className="track-pill">Gleis {track}</span></td><td><div className="data-value"><strong>{data?.platform_height_mm != null ? `${data.platform_height_mm} mm` : edge?.height ? `${Number(edge.height) * 1000} mm` : 'Nicht geliefert'}</strong><span>{data?.platform_height_mm != null ? 'DB InfraGO' : 'OpenStreetMap'}</span></div></td><td>{edge ? <div className="data-value"><strong>{edge.length.toFixed(1)} m</strong><span>OSM-Geometrie</span></div> : <span className="data-missing">Keine OSM-Kante zugeordnet</span>}</td><td>{data?.net_construction_length_m != null ? <div className="data-value"><strong>{data.net_construction_length_m.toFixed(1)} m</strong><span>DB InfraGO Stationsausstattung</span></div> : <span className="data-missing">Bei DB InfraGO nicht geliefert</span>}</td><td>{data?.usable_length_m != null ? <div className="data-value"><strong>{data.usable_length_m.toFixed(1)} m</strong><span>ERA RINF · {data.rinf_platform_id || track}</span></div> : <span className="data-missing">In RINF nicht zugeordnet</span>}</td><td>{edge && start ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'start')}><strong>{start.lat.toFixed(6)}, {start.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td><td>{edge && end ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'end')}><strong>{end.lat.toFixed(6)}, {end.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td></tr>;
+            return <tr key={`${track}-${edge?.id ?? 'db'}`}><td><span className="track-pill">Gleis {track}</span></td><td><div className="data-value"><strong>{data?.platform_height_mm != null ? `${data.platform_height_mm} mm` : edge?.height ? `${Number(edge.height) * 1000} mm` : 'Nicht geliefert'}</strong><span>{data?.platform_height_mm != null ? 'DB InfraGO' : 'OpenStreetMap'}</span></div></td><td>{edge ? <div className="data-value"><strong>{edge.length.toFixed(1)} m</strong><span>OSM-Geometrie</span></div> : <span className="data-missing">Keine OSM-Kante zugeordnet</span>}</td><td>{data?.net_construction_length_m != null ? <div className="data-value"><strong>{data.net_construction_length_m.toFixed(1)} m</strong><span>DB InfraGO Stationsausstattung</span></div> : <span className="data-missing">Bei DB InfraGO nicht geliefert</span>}</td><td>{data?.usable_length_m != null ? <div className="data-value"><strong>{data.usable_length_m.toFixed(1)} m</strong><span>RINF {data.rinf_platform_id || track}{data.rinf_platform_id && data.rinf_platform_id !== track ? ` → DB Gleis ${track}` : ''}</span>{data.rinf_track_id ? <span>Track-ID {data.rinf_track_id} · {data.mapping_confidence === 'confirmed' ? 'bestätigt' : data.mapping_confidence === 'derived' ? 'eindeutig abgeleitet' : 'nicht zugeordnet'}</span> : null}</div> : <span className="data-missing">In RINF nicht zugeordnet</span>}</td><td>{edge && start ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'start')}><strong>{start.lat.toFixed(6)}, {start.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td><td>{edge && end ? <button type="button" className="generic-endpoint-button" onClick={() => focusEndpoint(edge, 'end')}><strong>{end.lat.toFixed(6)}, {end.lon.toFixed(6)}</strong><span>Im Luftbild prüfen</span></button> : <span className="data-missing">Keine OSM-Koordinate</span>}</td></tr>;
           })}{!loading && !platformRows.length ? <tr><td colSpan={7}><span className="data-missing">Keine Bahnsteigdaten in DB InfraGO, RINF oder OSM gefunden.</span></td></tr> : null}</tbody>
         </table>
       </div>

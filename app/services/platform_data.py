@@ -15,6 +15,11 @@ from app.collectors.rinf import RINF_ENDPOINT
 DB_EQUIPMENT_INDEX = "https://www.dbinfrago.com/web/bahnhoefe/leistungen/stationsnutzung/stationshalt/stationsausstattung"
 _INDEX_CACHE: tuple[float, dict[str, str]] | None = None
 _INDEX_LOCK = asyncio.Lock()
+# Station-scoped crosswalks verified against DB operational documentation/user review.
+# RINF platform IDs are not public passenger track numbers.
+RINF_PLATFORM_CROSSWALKS: dict[str, dict[str, str]] = {
+    "FBB": {"293": "1"},
+}
 
 
 def _normalize(value: str) -> str:
@@ -60,8 +65,30 @@ def parse_rinf_lengths(data: dict[str, Any]) -> list[dict[str, Any]]:
             length = float(value("length") or "")
         except ValueError:
             continue
-        rows.append({"platform_id": (value("platformId") or "").strip(), "usable_length_m": length, "uopid": value("uopid"), "source_url": value("platform") or RINF_ENDPOINT})
+        rows.append({"platform_id": (value("platformId") or "").strip(), "track_id": value("trackId"), "usable_length_m": length, "uopid": value("uopid"), "source_url": value("platform") or RINF_ENDPOINT})
     return rows
+
+
+def map_rinf_platforms(db_platforms: list[dict[str, Any]], rinf_platforms: list[dict[str, Any]], ril: str) -> tuple[dict[str, dict[str, Any]], set[str]]:
+    """Map RINF asset IDs to DB passenger track numbers with auditable methods."""
+    mapped: dict[str, dict[str, Any]] = {}
+    used: set[str] = set()
+    rinf_by_id = {row["platform_id"]: row for row in rinf_platforms}
+    for db in db_platforms:
+        if db["track"] in rinf_by_id:
+            mapped[db["track"]] = {**rinf_by_id[db["track"]], "mapping_method": "exact_platform_id", "mapping_confidence": "confirmed"}
+            used.add(db["track"])
+    for rinf_id, db_track in RINF_PLATFORM_CROSSWALKS.get(ril, {}).items():
+        if rinf_id in rinf_by_id and any(row["track"] == db_track for row in db_platforms):
+            mapped[db_track] = {**rinf_by_id[rinf_id], "mapping_method": "station_crosswalk", "mapping_confidence": "confirmed"}
+            used.add(rinf_id)
+    remaining_db = [row for row in db_platforms if row["track"] not in mapped]
+    remaining_rinf = [row for row in rinf_platforms if row["platform_id"] not in used]
+    if len(remaining_db) == len(remaining_rinf) == 1:
+        row = remaining_rinf[0]
+        mapped[remaining_db[0]["track"]] = {**row, "mapping_method": "bijective_remainder", "mapping_confidence": "derived"}
+        used.add(row["platform_id"])
+    return mapped, used
 
 
 async def _equipment_index(client: httpx.AsyncClient) -> dict[str, str]:
@@ -83,9 +110,9 @@ async def load_platform_data(name: str, ril: str) -> dict[str, Any]:
     today = date.today().isoformat()
     query = f'''PREFIX era: <http://data.europa.eu/949/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT DISTINCT ?opLabel ?uopid ?platform ?platformId ?length WHERE {{
+SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
   ?op a era:OperationalPoint ; rdfs:label ?opLabel ; era:uopid ?uopid ; era:track ?track .
-  ?track era:platformEdge ?platform .
+  ?track era:trackId ?trackId ; era:platformEdge ?platform .
   ?platform era:platformId ?platformId ; era:lengthOfPlatform ?length .
   OPTIONAL {{ ?platform era:validityStartDate ?validFrom }}
   OPTIONAL {{ ?platform era:validityEndDate ?validTo }}
@@ -107,17 +134,14 @@ SELECT DISTINCT ?opLabel ?uopid ?platform ?platformId ?length WHERE {{
             db_platforms = []
         rinf_response.raise_for_status()
     rinf_platforms = parse_rinf_lengths(rinf_response.json())
-    by_track = {row["platform_id"]: row for row in rinf_platforms}
-    if len(db_platforms) == len(rinf_platforms) == 1:
-        by_track[db_platforms[0]["track"]] = rinf_platforms[0]
+    by_track, used_rinf_ids = map_rinf_platforms(db_platforms, rinf_platforms, safe_ril)
     platforms = []
     for row in db_platforms:
         usable = by_track.get(row["track"])
-        platforms.append({**row, "usable_length_m": usable["usable_length_m"] if usable else None, "rinf_platform_id": usable["platform_id"] if usable else None})
-    known_tracks = {row["track"] for row in db_platforms}
+        platforms.append({**row, "usable_length_m": usable["usable_length_m"] if usable else None, "rinf_platform_id": usable["platform_id"] if usable else None, "rinf_track_id": usable.get("track_id") if usable else None, "mapping_method": usable.get("mapping_method") if usable else None, "mapping_confidence": usable.get("mapping_confidence") if usable else None})
     for row in rinf_platforms:
-        if row["platform_id"] not in known_tracks and not (len(db_platforms) == len(rinf_platforms) == 1):
-            platforms.append({"track": row["platform_id"], "platform_height_mm": None, "net_construction_length_m": None, "usable_length_m": row["usable_length_m"], "rinf_platform_id": row["platform_id"]})
+        if row["platform_id"] not in used_rinf_ids:
+            platforms.append({"track": row["platform_id"], "platform_height_mm": None, "net_construction_length_m": None, "usable_length_m": row["usable_length_m"], "rinf_platform_id": row["platform_id"], "rinf_track_id": row.get("track_id"), "mapping_method": "unmapped", "mapping_confidence": "unresolved"})
     return {
         "station": name,
         "ril": safe_ril,

@@ -1,4 +1,4 @@
-from app.services.platform_data import parse_db_platform_table, parse_equipment_index, parse_rinf_lengths
+from app.services.platform_data import map_rinf_platforms, parse_db_platform_table, parse_equipment_index, parse_rinf_lengths
 
 
 def test_parses_db_platform_dimensions_from_compact_table():
@@ -22,3 +22,17 @@ def test_parses_rinf_usable_lengths():
         "length": {"value": "112"}, "platform": {"value": "https://example.test/platform/1"},
     }]}}
     assert parse_rinf_lengths(data)[0]["usable_length_m"] == 112.0
+
+
+def test_maps_bruchenbruecken_crosswalk_and_unique_remainder():
+    db = [{"track": "1"}, {"track": "2"}]
+    rinf = [
+        {"platform_id": "293", "track_id": "293_113300", "usable_length_m": 210},
+        {"platform_id": "538", "track_id": "538_113301", "usable_length_m": 210},
+    ]
+    mapped, used = map_rinf_platforms(db, rinf, "FBB")
+    assert mapped["1"]["platform_id"] == "293"
+    assert mapped["1"]["mapping_method"] == "station_crosswalk"
+    assert mapped["2"]["platform_id"] == "538"
+    assert mapped["2"]["mapping_method"] == "bijective_remainder"
+    assert used == {"293", "538"}
