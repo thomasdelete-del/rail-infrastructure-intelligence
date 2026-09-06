@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.station_identity import select_station_identity
+from app.services.station_identity import prioritize_station_identity, select_station_identity
 
 
 def station(osm_id, name, lat, lon, **tags):
@@ -21,3 +21,16 @@ def test_identity_prefers_name_and_distance_and_returns_db_keys():
 def test_identity_rejects_station_outside_radius():
     with pytest.raises(LookupError):
         select_station_identity([station(1, "Elsewhere", 53.0, 10.0)], "Dorheim", 50.4, 8.8)
+
+
+def test_netex_identity_has_priority_and_osm_cannot_overwrite_it():
+    result = prioritize_station_identity(
+        {"name": "Dorheim", "station_number": 1273, "eva": "8001520", "ril": "FDHM", "dhid": "de:06440:6402"},
+        {"name": "Dorheim Europa", "ril": "WRONG"},
+        {"matched_name": "Dorheim OSM", "station_number": "9999", "osm_type": "node", "osm_id": 1},
+    )
+    assert result["matched_name"] == "Dorheim"
+    assert result["station_number"] == 1273
+    assert result["ril"] == "FDHM"
+    assert result["identity_source"] == "netex"
+    assert result["osm_id"] == 1

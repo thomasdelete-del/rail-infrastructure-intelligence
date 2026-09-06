@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -17,7 +18,7 @@ from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBER
 from app.services.change_report import build_change_report
 from app.services.aerial_analysis import analyse_osm_platform
 from app.services.aerial_learning import store_training_sample
-from app.services.station_identity import resolve_station_identity
+from app.services.station_identity import prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_station_identity
 from app.services.dynamic_station_sources import collect_db_station_sources
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
@@ -58,8 +59,10 @@ async def resolve_netex_identity(name: str = Query(min_length=2, max_length=160)
     if (latitude is None) != (longitude is None):
         raise HTTPException(status_code=422, detail="latitude and longitude must be supplied together")
     try:
-        xml = await OpenStationCollector().fetch_netex()
-        return select_station_identity_from_netex(xml, name, latitude, longitude)
+        if latitude is None or longitude is None:
+            xml = await OpenStationCollector().fetch_netex()
+            return select_station_identity_from_netex(xml, name)
+        return await resolve_netex_station_identity(name, latitude, longitude)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -69,9 +72,23 @@ async def resolve_netex_identity(name: str = Query(min_length=2, max_length=160)
 
 @app.get("/stations/dynamic-sources")
 async def dynamic_sources(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
-    identity = await resolve_station_identity(name, latitude, longitude)
+    netex, osm = await asyncio.gather(
+        resolve_netex_station_identity(name, latitude, longitude),
+        resolve_station_identity(name, latitude, longitude),
+        return_exceptions=True,
+    )
+    identity = prioritize_station_identity(
+        netex if isinstance(netex, dict) else None,
+        None,
+        osm if isinstance(osm, dict) else None,
+    )
     db_sources = await collect_db_station_sources(identity.get("station_number"))
-    return {"identity": identity, "sources": {"openstreetmap": {"status": "active"}, **db_sources}}
+    return {"identity": identity, "sources": {
+        "netex": {"status": "active" if isinstance(netex, dict) else "not_found", "role": "primary"},
+        "era_rinf": {"status": "available_for_enrichment", "role": "secondary_authority"},
+        "openstreetmap": {"status": "active" if isinstance(osm, dict) else "not_found", "role": "geometry_only"},
+        **db_sources,
+    }}
 
 @app.get("/stations/friedberg-hess")
 def friedberg():

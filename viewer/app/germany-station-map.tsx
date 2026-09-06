@@ -78,13 +78,14 @@ export function SelectedStationMap({
     stationNumber?: string;
     osm?: string;
   } | null>(null);
-  const [dbSources, setDbSources] = useState<{ stada?: string; fasta?: string; facilities?: number }>({});
+  const [dbSources, setDbSources] = useState<{ netex?: string; rinf?: string; osm?: string; stada?: string; fasta?: string; facilities?: number }>({});
   const [platformEdges, setPlatformEdges] = useState<PlatformEdge[]>([]);
   const [imagery, setImagery] = useState<'none' | 'satellite' | 'official'>('none');
   const [loading, setLoading] = useState(true);
-  const displayName = /bahnhof$/i.test(station.name.trim())
-    ? station.name
-    : `${station.name} Bahnhof`;
+  const authoritativeName = identity?.name || station.name;
+  const displayName = /bahnhof$/i.test(authoritativeName.trim())
+    ? authoritativeName
+    : `${authoritativeName} Bahnhof`;
   const officialImageryAvailable = station.latitude >= 49.39 && station.latitude <= 51.66 && station.longitude >= 7.77 && station.longitude <= 10.24;
   const focusEndpoint = (edge: PlatformEdge, endpoint: 'start' | 'end') => {
     const point = endpoint === 'start' ? edge.geometry[0] : edge.geometry.at(-1);
@@ -96,7 +97,7 @@ export function SelectedStationMap({
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
     void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
-      .then((raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); })
+      .then((raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); })
       .catch((error: Error) => { if (error.name !== 'AbortError') setIdentity(null); });
     return () => controller.abort();
   }, [station]);
@@ -234,11 +235,12 @@ export function SelectedStationMap({
           <p className="map-kicker">KARTENEINSTIEG</p>
           <h2>{displayName} im Lageplan</h2>
           <p>
-            Infrastrukturobjekte aus OpenStreetMap/Overpass werden live im
-            Bahnhofsumfeld geladen.
+            Stationsstammdaten aus DB InfraGO NeTEx; europäische Register ergänzen. OpenStreetMap liefert nachrangig die Geometrie.
           </p>
           <div className="selected-station-meta">
-            <span>OpenStreetMap: aktiv</span>
+            <span>DB InfraGO NeTEx: {dbSources.netex ?? 'wird geprüft'} · Primärquelle</span>
+            <span>ERA RINF: {dbSources.rinf ?? 'wird geprüft'} · amtliche Ergänzung</span>
+            <span>OpenStreetMap: {dbSources.osm ?? 'wird geprüft'} · nur Geometrie/Gegenprüfung</span>
             <span>
               {loading
                 ? 'Infrastruktur wird geladen …'
