@@ -337,6 +337,7 @@ export function GermanyStationMap({
   const [query, setQuery] = useState(''),
     [stations, setStations] = useState(MAJOR),
     [searching, setSearching] = useState(false),
+    [showResults, setShowResults] = useState(false),
     [message, setMessage] = useState(
       'Friedberg (Hess) ist vollständig verfügbar; weitere Bahnhöfe können gesucht werden.',
     );
@@ -396,23 +397,15 @@ export function GermanyStationMap({
     if (!query.trim()) return;
     setSearching(true);
     try {
-      const r = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=jsonv2&countrycodes=de&limit=8&q=${encodeURIComponent(`${query} Bahnhof`)}`,
-        { headers: { 'Accept-Language': 'de' } },
-      );
+      const r = await fetch(`${API}/stations/search-netex?query=${encodeURIComponent(query)}&limit=12`, { cache: 'no-store' });
       if (!r.ok) throw new Error();
-      const d = (await r.json()) as Array<{
-        place_id: number;
-        display_name: string;
-        lat: string;
-        lon: string;
-      }>;
-      const found = d
+      const d = (await r.json()) as { stations: Array<{ netex_id: string; name: string; latitude: number; longitude: number }> };
+      const found = d.stations
         .map((x) => ({
-          id: `osm-${x.place_id}`,
-          name: x.display_name.split(',')[0],
-          latitude: Number(x.lat),
-          longitude: Number(x.lon),
+          id: `netex-${x.netex_id}`,
+          name: x.name,
+          latitude: Number(x.latitude),
+          longitude: Number(x.longitude),
         }))
         .filter(
           (x) => Number.isFinite(x.latitude) && Number.isFinite(x.longitude),
@@ -423,6 +416,7 @@ export function GermanyStationMap({
       }
       const first = found[0];
       setStations(found);
+      setShowResults(true);
       map.current?.setView([first.latitude, first.longitude], 16, {
         animate: true,
       });
@@ -431,7 +425,7 @@ export function GermanyStationMap({
         `${first.name} wird in der Kartenansicht angezeigt. ${found.length > 1 ? 'Weitere Treffer sind ebenfalls markiert.' : ''}`,
       );
     } catch {
-      setMessage('Bahnhofssuche ist momentan nicht erreichbar.');
+      setMessage('DB-NeTEx-Stationsliste ist momentan nicht erreichbar.');
     } finally {
       setSearching(false);
     }
@@ -444,17 +438,14 @@ export function GermanyStationMap({
           <h2>Deutschlandweite Bahnhofssuche</h2>
           <p>Ort oder Bahnhof eingeben und einen Marker wählen.</p>
         </div>
-        <form onSubmit={search}>
-          <Search size={17} />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="z. B. Kassel, Köln Hbf"
-          />
-          <button disabled={searching}>
-            {searching ? 'Suche …' : 'Suchen'}
-          </button>
-        </form>
+        <div className="station-picker">
+          <form onSubmit={search}>
+            <Search size={17} />
+            <input value={query} onChange={(e) => { setQuery(e.target.value); if (!e.target.value) setShowResults(false); }} placeholder="DB-Bahnhof suchen, z. B. Kassel" />
+            <button disabled={searching}>{searching ? 'Suche …' : 'Suchen'}</button>
+          </form>
+          {showResults ? <div className="station-picker-results" role="listbox" aria-label="DB-Stationsliste">{stations.map((station) => <button type="button" role="option" key={station.id} onClick={() => { onSelect(station); map.current?.setView([station.latitude, station.longitude], 16); setShowResults(false); }}><TrainFront size={15}/><span>{station.name}</span><small>DB InfraGO NeTEx</small></button>)}</div> : null}
+        </div>
       </div>
       <div ref={el} className="germany-map" />
       <div className="germany-map-status">

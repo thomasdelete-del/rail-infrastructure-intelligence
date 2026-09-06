@@ -18,7 +18,7 @@ from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBER
 from app.services.change_report import build_change_report
 from app.services.aerial_analysis import analyse_osm_platform
 from app.services.aerial_learning import store_training_sample
-from app.services.station_identity import prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_station_identity
+from app.services.station_identity import prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_station_identity, search_netex_stations
 from app.services.dynamic_station_sources import collect_db_station_sources
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
@@ -69,6 +69,13 @@ async def resolve_netex_identity(name: str = Query(min_length=2, max_length=160)
         raise HTTPException(status_code=409, detail=str(error)) from error
     except httpx.HTTPError as error:
         raise HTTPException(status_code=502, detail="NeTEx identity service is temporarily unavailable") from error
+
+@app.get("/stations/search-netex")
+async def search_netex(query: str = Query(min_length=1, max_length=100), limit: int = Query(default=12, ge=1, le=30)):
+    try:
+        return {"source": "DB InfraGO NeTEx", "stations": await search_netex_stations(query, limit)}
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="NeTEx station list is temporarily unavailable") from error
 
 @app.get("/stations/dynamic-sources")
 async def dynamic_sources(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):

@@ -67,13 +67,36 @@ async def resolve_station_identity(name: str, latitude: float, longitude: float)
 
 async def resolve_netex_identity(name: str, latitude: float, longitude: float) -> dict[str, Any]:
     """Resolve the authoritative station identity from the NeTEx delivery."""
+    from app.collectors.openstation import select_station_identity_from_netex
+    return select_station_identity_from_netex(await _netex_xml(), name, latitude, longitude)
+
+
+async def _netex_xml() -> bytes:
+    """Download the NeTEx delivery once per hour for identity operations."""
     global _NETEX_CACHE
-    from app.collectors.openstation import OpenStationCollector, select_station_identity_from_netex
+    from app.collectors.openstation import OpenStationCollector
     async with _NETEX_CACHE_LOCK:
         if _NETEX_CACHE is None or monotonic() - _NETEX_CACHE[0] > 3600:
             _NETEX_CACHE = (monotonic(), await OpenStationCollector().fetch_netex())
-        xml = _NETEX_CACHE[1]
-    return select_station_identity_from_netex(xml, name, latitude, longitude)
+        return _NETEX_CACHE[1]
+
+
+async def search_netex_stations(query: str, limit: int = 12) -> list[dict[str, Any]]:
+    """Return ranked DB NeTEx stations for the station picker."""
+    from app.collectors.openstation import extract_station_identities
+    needle = " ".join(query.casefold().split())
+    matches = []
+    for identity in extract_station_identities(await _netex_xml()):
+        name = " ".join(identity["name"].casefold().split())
+        similarity = SequenceMatcher(None, needle, name).ratio()
+        if needle not in name and similarity < 0.55:
+            continue
+        if identity.get("latitude") is None or identity.get("longitude") is None:
+            continue
+        prefix_bonus = 0.25 if name.startswith(needle) else 0
+        matches.append((similarity + prefix_bonus, identity))
+    matches.sort(key=lambda item: (-item[0], item[1]["name"]))
+    return [identity for _, identity in matches[:limit]]
 
 
 def prioritize_station_identity(

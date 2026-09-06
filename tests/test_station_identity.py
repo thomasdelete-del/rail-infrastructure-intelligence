@@ -1,5 +1,7 @@
+import asyncio
 import pytest
 
+from app.services import station_identity
 from app.services.station_identity import prioritize_station_identity, select_station_identity
 
 
@@ -34,3 +36,11 @@ def test_netex_identity_has_priority_and_osm_cannot_overwrite_it():
     assert result["ril"] == "FDHM"
     assert result["identity_source"] == "netex"
     assert result["osm_id"] == 1
+
+
+def test_searches_db_netex_station_list(monkeypatch):
+    xml = b'''<root><StopPlace id="dhid:de:1"><Name>Dorheim</Name><PrivateCode>1273</PrivateCode><Centroid><Location><Latitude>50.35</Latitude><Longitude>8.79</Longitude></Location></Centroid></StopPlace><StopPlace id="dhid:de:2"><Name>Berlin Hbf</Name><Centroid><Location><Latitude>52.52</Latitude><Longitude>13.36</Longitude></Location></Centroid></StopPlace></root>'''
+    async def fixture(): return xml
+    monkeypatch.setattr(station_identity, "_netex_xml", fixture)
+    result = asyncio.run(station_identity.search_netex_stations("Dorheim"))
+    assert [item["station_number"] for item in result] == [1273]
