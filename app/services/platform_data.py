@@ -19,6 +19,18 @@ _PLATFORM_SOURCE_CACHE: dict[str, dict[str, Any]] = {}
 # Station-scoped crosswalks verified against DB operational documentation/user review.
 # RINF platform IDs are not public passenger track numbers.
 RINF_PLATFORM_CROSSWALKS: dict[str, dict[str, str]] = {
+    "FFG": {
+        "1": "1",
+        "1a": "1a",
+        "2": "2",
+        "4": "4",
+        "5": "5",
+        "7": "7",
+        "8": "8",
+        "10": "10",
+        "11": "11",
+        "12": "12",
+    },
     "FBB": {"293": "1"},
     "FLIH": {"962": "1"},
 }

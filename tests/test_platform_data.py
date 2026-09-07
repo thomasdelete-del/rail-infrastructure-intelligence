@@ -76,3 +76,27 @@ def test_maps_lispenhausen_platform_962_to_public_track_1():
     assert mapped["2"]["platform_id"] == "970"
     assert mapped["2"]["mapping_method"] == "bijective_remainder"
     assert used == {"962", "970"}
+
+
+def test_restores_friedberg_pilot_platform_length_crosswalk():
+    tracks = ["1", "1a", "2", "4", "5", "7", "8", "10", "11", "12"]
+    db = [{"track": track} for track in tracks]
+    rinf = [
+        {
+            "platform_id": track,
+            "track_id": f"{track}_direction_a",
+            "directional_track_ids": [
+                f"{track}_direction_a",
+                f"{track}_direction_b",
+            ],
+            "usable_length_m": 100 + index,
+        }
+        for index, track in enumerate(tracks)
+    ]
+
+    mapped, used = map_rinf_platforms(db, rinf, "FFG")
+
+    assert used == set(tracks)
+    assert all(mapped[track]["platform_id"] == track for track in tracks)
+    assert all(mapped[track]["mapping_method"] == "station_crosswalk" for track in tracks)
+    assert all(mapped[track]["mapping_score"] == 100 for track in tracks)
