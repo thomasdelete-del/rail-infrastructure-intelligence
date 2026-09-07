@@ -251,6 +251,7 @@ export function SelectedStationMap({
     'loading' | 'active' | 'unavailable'
   >('loading');
   const [sourceUpdated, setSourceUpdated] = useState<Record<string, Date>>({});
+  const [databaseFreshness, setDatabaseFreshness] = useState<{ lastUpdate?: string; sources: Record<string, { sourceDate?: string; retrievalDate?: string; databaseUpdate?: string }> }>({ sources: {} });
   const [reviewKey, setReviewKey] = useState<string | null>(null);
   const [endpointReviews, setEndpointReviews] = useState<
     Record<string, 'correct' | 'none' | 'corrected'>
@@ -307,6 +308,17 @@ export function SelectedStationMap({
       setCorrectedGeometries({});
     }
   }, [station.id]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`${API}/sources/freshness`, { cache: 'no-store', signal: controller.signal })
+      .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
+      .then((raw: unknown) => {
+        const data = raw as { last_database_update?: string | null; sources?: Array<{ source_key: string; source_date?: string | null; retrieval_date?: string | null; last_database_update?: string | null }> };
+        setDatabaseFreshness({ lastUpdate: data.last_database_update ?? undefined, sources: Object.fromEntries((data.sources ?? []).map((source) => [source.source_key, { sourceDate: source.source_date ?? undefined, retrievalDate: source.retrieval_date ?? undefined, databaseUpdate: source.last_database_update ?? undefined }])) });
+      })
+      .catch(() => setDatabaseFreshness({ sources: {} }));
+    return () => controller.abort();
+  }, [refreshNonce]);
   useEffect(() => {
     localStorage.setItem(
       `station-osm-confirmed:${station.id}`,
@@ -1412,42 +1424,49 @@ export function SelectedStationMap({
   const sourceEntries = [
     {
       key: 'stada',
+      databaseKey: 'db-infrago-stada',
       name: 'DB InfraGO StaDa',
       quality: 'A',
       state: sourceState(dbSources.stada),
     },
     {
       key: 'netex',
+      databaseKey: 'db-infrago-openstation-netex',
       name: 'DB InfraGO OpenStation / NeTEx',
       quality: 'A',
       state: sourceState(dbSources.netex),
     },
     {
       key: 'rinf',
+      databaseKey: 'era-rinf',
       name: 'ERA Infrastrukturregister RINF',
       quality: 'A',
       state: sourceState(dbSources.rinf),
     },
     {
       key: 'osm',
+      databaseKey: 'openstreetmap',
       name: 'OpenStreetMap',
       quality: 'D',
       state: dbSources.osm === 'cached' ? 'cached' : osmBaseMapStatus,
     },
     {
       key: 'satellite',
+      databaseKey: '',
       name: 'Satellitenbild Esri / Maxar',
       quality: 'B',
       state: satelliteStatus,
     },
     {
       key: 'official',
+      databaseKey: 'geoportal-hessen-dop20',
       name: 'Amtliches Luftbild',
       quality: 'A',
       state: officialImageryStatus,
     },
     {
       key: 'fasta',
+      databaseKey: 'db-infrago-fasta',
       name: 'DB InfraGO FaSta',
       quality: 'A',
       state: sourceState(dbSources.fasta),
@@ -1473,6 +1492,14 @@ export function SelectedStationMap({
           : state === 'not_found'
             ? 'Quelle erreichbar, kein passender Datensatz'
             : 'Kein erfolgreicher Abruf in dieser Sitzung';
+  const formatSourceDate = (value?: string) => value ? new Date(value).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: value.includes('T') ? 'short' : undefined }) : null;
+  const sourceDataDate = (source: { key: string; databaseKey: string }) => {
+    if (source.key === 'satellite') return 'Bildaufnahmedatum: standortabhängig; vom Kartendienst nicht ausgewiesen';
+    if (source.key === 'official') return 'Orthofoto-Aufnahmedatum: im WMS-Layer nicht ausgewiesen';
+    const stored = databaseFreshness.sources[source.databaseKey];
+    const date = formatSourceDate(stored?.sourceDate ?? stored?.databaseUpdate);
+    return date ? `Datenstand: ${date}` : 'Datenstand: von der Quelle nicht ausgewiesen';
+  };
   const inventoryObjects = inventory?.objects ?? [];
   const inventoryCounts = Object.fromEntries(
     ['platform', 'platform_edge', 'entrance', 'equipment'].map((type) => [
@@ -1900,6 +1927,7 @@ export function SelectedStationMap({
             <p>
               Aktive Verbindungen und Qualitätsklasse für {authoritativeName}
             </p>
+            <p className="database-update-date">Letzte Aktualisierung der Infrastrukturdatenbank: {formatSourceDate(databaseFreshness.lastUpdate) ?? 'noch nicht ausgewiesen'}</p>
           </div>
           <strong>
             {sourceEntries.filter((source) => source.state === 'active').length}{' '}
@@ -1918,6 +1946,7 @@ export function SelectedStationMap({
                   Qualitätsklasse {source.quality}
                 </p>
                 <p className="source-freshness">
+                  {sourceDataDate(source)}<br />
                   {sourceFreshness(source.key, source.state)}
                 </p>
               </div>

@@ -10,7 +10,7 @@ from app.collectors.stada import StaDaCollector
 from app.collectors.fasta import FaStaCollector
 from app.collectors.rinf import RINFCollector
 from app.database import database_health
-from app.repository import load_infrastructure_inventory, summarize_infrastructure_inventory
+from app.repository import load_infrastructure_inventory, load_source_freshness, summarize_infrastructure_inventory
 from app.seed.friedberg import FRIEDBERG
 from app.seed.friedberg_geometry import FRIEDBERG_GEOMETRY
 from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SOURCES
@@ -44,6 +44,13 @@ def health(): return {"status": "ok"}
 
 @app.get("/health/database")
 def health_database(): return {"status": "ok" if database_health() else "error"}
+
+@app.get("/sources/freshness")
+def source_freshness():
+    try:
+        return load_source_freshness()
+    except RuntimeError:
+        return {"last_database_update": None, "sources": [], "status": "database_not_configured"}
 
 @app.get("/stations/resolve-identity")
 async def resolve_identity(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):

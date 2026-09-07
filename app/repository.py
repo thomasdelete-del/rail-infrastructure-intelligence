@@ -8,6 +8,22 @@ from sqlalchemy import text
 from app.database import get_engine
 
 
+def load_source_freshness() -> dict[str, Any]:
+    """Return source dates and the actual latest database write timestamp."""
+    sql = text('''
+        SELECT s.source_key, s.source_date, s.retrieval_date,
+               MAX(o.observed_at) AS last_database_update
+        FROM source s
+        LEFT JOIN observation o ON o.source_id = s.id
+        GROUP BY s.source_key, s.source_date, s.retrieval_date
+        ORDER BY s.source_key
+    ''')
+    with get_engine().connect() as connection:
+        rows = [dict(row) for row in connection.execute(sql).mappings()]
+    updates = [row["last_database_update"] for row in rows if row["last_database_update"] is not None]
+    return {"last_database_update": max(updates) if updates else None, "sources": rows}
+
+
 def load_observations(source_key: str | None = None) -> list[dict[str, Any]]:
     source_filter = "" if source_key is None else "WHERE s.source_key = :source_key"
     sql = text(f'''
