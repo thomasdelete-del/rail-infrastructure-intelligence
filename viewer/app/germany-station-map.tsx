@@ -2587,7 +2587,10 @@ export function SelectedStationMap({
         <div className="generic-feature-heading">
           <div>
             <h2>Bahnsteigübersicht</h2>
-            <p>DB-Gleisnummern mit zugeordneten RINF-Infrastrukturkennungen</p>
+            <p>
+              Bahnsteigkantendaten aus DB InfraGO, OpenStreetMap, ERA RINF und
+              Luftbildprüfung
+            </p>
           </div>
           <span className="status-ok">
             <ShieldCheck size={15} />
@@ -2597,12 +2600,18 @@ export function SelectedStationMap({
         <div className="generic-platform-overview">
           {platformRows.map(({ track, edge, data }, index) => {
             const check = lengthComparison(edge, data);
+            const reviewed = edge
+              ? (['start', 'end'] as const).filter((endpoint) =>
+                  Boolean(endpointReviews[`${edge.id}:${endpoint}`]),
+                ).length
+              : 0;
+            const aerial = edge ? aerialResults[edge.id] : undefined;
             return (
               <div className="generic-platform-row" key={`overview-${track}`}>
                 <strong>B{index + 1}</strong>
                 <div>
                   <span>Bahnsteig Gleis {track}</span>
-                  <div>
+                  <div className="platform-overview-title">
                     {edge ? (
                       <button
                         type="button"
@@ -2615,26 +2624,71 @@ export function SelectedStationMap({
                     ) : (
                       <span className="track-pill">Gleis {track}</span>
                     )}
-                    {data?.rinf_platform_id ? (
-                      <small>
-                        RINF {data.rinf_platform_id}
-                        {data.rinf_platform_id !== track
-                          ? ` → Gleis ${track}`
-                          : ''}
-                      </small>
-                    ) : (
-                      <small>RINF nicht zugeordnet</small>
-                    )}
-                    {check ? (
-                      <small>
-                        {Math.abs(check.delta).toFixed(1)} m Abweichung ·{' '}
-                        {check.level === 'low'
-                          ? 'gering'
-                          : check.level === 'check'
-                            ? 'prüfen'
-                            : 'auffällig'}
-                      </small>
-                    ) : null}
+                  </div>
+                  <div className="platform-overview-sources">
+                    <div>
+                      <b>DB InfraGO</b>
+                      <span>
+                        Höhe:{' '}
+                        {data?.platform_height_mm != null
+                          ? `${data.platform_height_mm} mm`
+                          : 'nicht geliefert'}
+                      </span>
+                      <span>
+                        Nettobaulänge:{' '}
+                        {data?.net_construction_length_m != null
+                          ? `${data.net_construction_length_m.toFixed(1)} m`
+                          : 'nicht geliefert'}
+                      </span>
+                    </div>
+                    <div>
+                      <b>OpenStreetMap</b>
+                      <span>
+                        {edge
+                          ? `${edge.length.toFixed(1)} m · ${edge.trackSource === 'ref' ? 'ref' : edge.trackSource}=${edge.track}`
+                          : 'Keine Bahnsteigkante zugeordnet'}
+                      </span>
+                      {edge?.osmId ? (
+                        <span>
+                          {edge.osmType} {edge.osmId}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div>
+                      <b>ERA RINF · rinf-plus</b>
+                      <span>
+                        {data?.rinf_platform_id
+                          ? `platformId ${data.rinf_platform_id}${data.rinf_platform_id !== track ? ` → Gleis ${track}` : ''}`
+                          : 'Nicht zugeordnet'}
+                      </span>
+                      <span>
+                        Nutzlänge:{' '}
+                        {data?.usable_length_m != null
+                          ? `${data.usable_length_m.toFixed(1)} m`
+                          : 'nicht geliefert'}
+                      </span>
+                    </div>
+                    <div>
+                      <b>Luftbildprüfung</b>
+                      <span>
+                        {edge
+                          ? `${reviewed}/2 Endpunkte fachlich bearbeitet`
+                          : 'Ohne OSM-Geometrie nicht möglich'}
+                      </span>
+                      <span>
+                        {aerial
+                          ? `Erkennungssicherheit ${Math.round(aerial.confidence * 100)} %`
+                          : 'Noch nicht automatisch geprüft'}
+                      </span>
+                    </div>
+                    <div className="platform-overview-comparison">
+                      <b>Längenvergleich OSM–DB</b>
+                      <span>
+                        {check
+                          ? `${Math.abs(check.delta).toFixed(1)} m Abweichung · ${check.level === 'low' ? 'gering' : check.level === 'check' ? 'prüfen' : 'auffällig'}`
+                          : 'Nicht vergleichbar'}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <i
