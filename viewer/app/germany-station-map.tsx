@@ -157,78 +157,6 @@ const geometryLength = (geometry: Array<{ lat: number; lon: number }>) =>
     .slice(1)
     .reduce((sum, point, index) => sum + distance(geometry[index], point), 0);
 
-const lateralDistanceToGeometry = (
-  point: { lat: number; lon: number },
-  geometry: Array<{ lat: number; lon: number }>,
-) => {
-  const latitudeScale = 111_320;
-  const longitudeScale = latitudeScale * Math.cos((point.lat * Math.PI) / 180);
-  return geometry.slice(1).reduce((nearest, end, index) => {
-    const start = geometry[index];
-    const segmentX = (end.lon - start.lon) * longitudeScale;
-    const segmentY = (end.lat - start.lat) * latitudeScale;
-    const pointX = (point.lon - start.lon) * longitudeScale;
-    const pointY = (point.lat - start.lat) * latitudeScale;
-    const segmentLength = Math.hypot(segmentX, segmentY);
-    if (!segmentLength) return nearest;
-    return Math.min(
-      nearest,
-      Math.abs(segmentX * pointY - segmentY * pointX) / segmentLength,
-    );
-  }, Number.POSITIVE_INFINITY);
-};
-
-const belongsToPlatformSide = (
-  point: { lat: number; lon: number },
-  target: PlatformEdge,
-  edges: PlatformEdge[],
-) => {
-  const targetDistance = lateralDistanceToGeometry(point, target.geometry);
-  if (targetDistance > 12) return false;
-  const nearestOtherDistance = Math.min(
-    ...edges
-      .filter((edge) => edge.id !== target.id)
-      .map((edge) => lateralDistanceToGeometry(point, edge.geometry)),
-  );
-  return (
-    !Number.isFinite(nearestOtherDistance) ||
-    targetDistance + 0.75 < nearestOtherDistance
-  );
-};
-
-const projectPointToGeometry = (
-  point: { lat: number; lon: number },
-  geometry: Array<{ lat: number; lon: number }>,
-) => {
-  const latitudeScale = 111_320;
-  const longitudeScale = latitudeScale * Math.cos((point.lat * Math.PI) / 180);
-  let nearest = point;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  geometry.slice(1).forEach((end, index) => {
-    const start = geometry[index];
-    const vectorX = (end.lon - start.lon) * longitudeScale;
-    const vectorY = (end.lat - start.lat) * latitudeScale;
-    const lengthSquared = vectorX * vectorX + vectorY * vectorY;
-    if (!lengthSquared) return;
-    const pointX = (point.lon - start.lon) * longitudeScale;
-    const pointY = (point.lat - start.lat) * latitudeScale;
-    const factor = Math.max(
-      0,
-      Math.min(1, (pointX * vectorX + pointY * vectorY) / lengthSquared),
-    );
-    const projected = {
-      lat: start.lat + (factor * vectorY) / latitudeScale,
-      lon: start.lon + (factor * vectorX) / longitudeScale,
-    };
-    const projectedDistance = distance(point, projected);
-    if (projectedDistance < nearestDistance) {
-      nearest = projected;
-      nearestDistance = projectedDistance;
-    }
-  });
-  return nearest;
-};
-
 export function SelectedStationMap({
   station,
   onBack,
@@ -466,26 +394,8 @@ export function SelectedStationMap({
       const targetEdge = platformEdges.find(
         (edge) => edge.id === target.edgeId,
       );
-      const targetBoundary = targetEdge
-        ? (originalGeometriesRef.current[targetEdge.id] ?? targetEdge.geometry)
-        : [];
-      const snappingEdge = targetEdge
-        ? { ...targetEdge, geometry: targetBoundary }
-        : undefined;
-      if (
-        !targetEdge ||
-        !snappingEdge ||
-        !belongsToPlatformSide(requestedCoordinate, snappingEdge, platformEdges)
-      ) {
-        setCorrectionError(
-          `Punkt liegt nicht eindeutig auf der Bahnsteigkante von Gleis ${target.track}.`,
-        );
-        return;
-      }
-      const coordinate = projectPointToGeometry(
-        requestedCoordinate,
-        targetBoundary,
-      );
+      if (!targetEdge) return;
+      const coordinate = requestedCoordinate;
       const key = `${target.edgeId}:${target.endpoint}`;
       setPendingPrimaryPoint({
         ...target,
@@ -1095,13 +1005,6 @@ export function SelectedStationMap({
             approvedGeometry?.length >= 2
               ? approvedGeometry.map((point) => ({ ...point }))
               : sourceGeometry;
-          if (approvedGeometry?.length >= 2 && geometry.length >= 2) {
-            geometry[0] = projectPointToGeometry(geometry[0], sourceGeometry);
-            geometry[geometry.length - 1] = projectPointToGeometry(
-              geometry.at(-1)!,
-              sourceGeometry,
-            );
-          }
           return { ...edge, geometry, length: geometryLength(geometry) };
         });
         displayEdges.forEach((edge) => {
@@ -1451,76 +1354,6 @@ export function SelectedStationMap({
           });
           if (!response.ok) throw new Error();
           const result = (await response.json()) as GenericAerialAnalysis;
-          if (
-            existingEdge &&
-            result.candidate_start &&
-            result.candidate_end &&
-            (!belongsToPlatformSide(
-              {
-                lat: result.candidate_start.latitude,
-                lon: result.candidate_start.longitude,
-              },
-              existingEdge,
-              platformEdges,
-            ) ||
-              !belongsToPlatformSide(
-                {
-                  lat: result.candidate_end.latitude,
-                  lon: result.candidate_end.longitude,
-                },
-                existingEdge,
-                platformEdges,
-              ))
-          ) {
-            result.status = 'check';
-            result.reason =
-              'Erkannter Abschluss liegt nicht eindeutig auf derselben Bahnsteigkante';
-            delete result.candidate_start;
-            delete result.candidate_end;
-          } else if (
-            existingEdge &&
-            result.candidate_start &&
-            result.candidate_end
-          ) {
-            const targetBoundary =
-              originalGeometriesRef.current[existingEdge.id] ??
-              existingEdge.geometry;
-            const snappedStart = projectPointToGeometry(
-              {
-                lat: result.candidate_start.latitude,
-                lon: result.candidate_start.longitude,
-              },
-              targetBoundary,
-            );
-            const snappedEnd = projectPointToGeometry(
-              {
-                lat: result.candidate_end.latitude,
-                lon: result.candidate_end.longitude,
-              },
-              targetBoundary,
-            );
-            result.candidate_start = {
-              latitude: snappedStart.lat,
-              longitude: snappedStart.lon,
-            };
-            result.candidate_end = {
-              latitude: snappedEnd.lat,
-              longitude: snappedEnd.lon,
-            };
-            result.start_shift_m = distance(
-              existingEdge.geometry[0],
-              snappedStart,
-            );
-            result.end_shift_m = distance(
-              existingEdge.geometry.at(-1)!,
-              snappedEnd,
-            );
-            result.maximum_endpoint_shift_m = Math.max(
-              result.start_shift_m,
-              result.end_shift_m,
-            );
-            result.candidate_length_m = distance(snappedStart, snappedEnd);
-          }
           const fallbackEdge =
             !existingEdge && result.candidate_start && result.candidate_end
               ? {
