@@ -53,3 +53,23 @@ def test_accepted_endpoint_is_stored_as_separate_confirmed_observation(monkeypat
     assert captured[1]["attribute"] == "confirmed_end_coordinates"
     assert captured[1]["value"] == {"latitude": 50.3, "longitude": 8.7}
     assert captured[1]["method"] == "manual_confirmation"
+
+
+def test_explicit_approval_stores_a_separate_primary_coordinate(monkeypatch):
+    captured = []
+    monkeypatch.setattr(aerial_learning, "store_observations", lambda items: captured.extend(items) or len(items))
+
+    stored = aerial_learning.store_training_sample(
+        "Friedberg (Hess):2",
+        "start",
+        False,
+        {"prominence": 4},
+        corrected_coordinate={"latitude": 50.3, "longitude": 8.7},
+        promote_to_primary=True,
+    )
+
+    assert stored == 2
+    assert captured[1]["attribute"] == "primary_start_coordinates"
+    assert captured[1]["method"] == "approved_primary_coordinate"
+    assert captured[1]["quality_class"] == "A"
+    assert captured[1]["metadata"]["approval"] == "explicit_user_confirmation"

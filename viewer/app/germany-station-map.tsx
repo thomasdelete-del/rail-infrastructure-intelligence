@@ -316,6 +316,14 @@ export function SelectedStationMap({
     track: string;
   } | null>(null);
   const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const [pendingPrimaryPoint, setPendingPrimaryPoint] = useState<{
+    edgeId: string;
+    endpoint: 'start' | 'end';
+    track: string;
+    coordinate: { lat: number; lon: number };
+    previousGeometry: Array<{ lat: number; lon: number }>;
+    previousReview?: 'correct' | 'none' | 'corrected';
+  } | null>(null);
   const [correctedGeometries, setCorrectedGeometries] = useState<
     Record<string, Array<{ lat: number; lon: number }>>
   >({});
@@ -474,6 +482,13 @@ export function SelectedStationMap({
         targetEdge.geometry,
         target.endpoint,
       );
+      const key = `${target.edgeId}:${target.endpoint}`;
+      setPendingPrimaryPoint({
+        ...target,
+        coordinate,
+        previousGeometry: targetEdge.geometry.map((point) => ({ ...point })),
+        previousReview: endpointReviews[key],
+      });
       setCorrectionError(null);
       setPlatformEdges((current) =>
         current.map((edge) => {
@@ -481,46 +496,13 @@ export function SelectedStationMap({
           const geometry = [...edge.geometry];
           if (target.endpoint === 'start') geometry[0] = coordinate;
           else geometry[geometry.length - 1] = coordinate;
-          setCorrectedGeometries((drafts) => ({
-            ...drafts,
-            [edge.id]: geometry,
-          }));
           return { ...edge, geometry, length: geometryLength(geometry) };
         }),
       );
-      const key = `${target.edgeId}:${target.endpoint}`;
       setEndpointReviews((current) => ({ ...current, [key]: 'corrected' }));
-      const analysis = aerialResults[target.edgeId];
-      const features =
-        target.endpoint === 'start'
-          ? analysis?.start_features
-          : analysis?.end_features;
-      setLearningMessage('Korrektur wird als Lernbeispiel gespeichert …');
-      void fetch(`${API}/stations/aerial-analysis/training-feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          track: `${authoritativeName}:${target.track}`,
-          endpoint: target.endpoint,
-          accepted: false,
-          features: features ?? {},
-          corrected_coordinate: {
-            latitude: coordinate.lat,
-            longitude: coordinate.lon,
-          },
-        }),
-      })
-        .then((response) => {
-          if (!response.ok) throw new Error();
-          setLearningMessage(
-            'Korrektur gespeichert – die Erkennung lernt aus diesem Beispiel.',
-          );
-        })
-        .catch(() =>
-          setLearningMessage(
-            'Korrektur lokal gespeichert; Lernserver derzeit nicht erreichbar.',
-          ),
-        );
+      setLearningMessage(
+        'Neuer Punkt ist ein Entwurf – Freigabe zur Speicherung in Railway erforderlich.',
+      );
       setCorrectionTarget(null);
     };
     const handleClick = (event: { latlng: { lat: number; lng: number } }) => {
@@ -545,9 +527,81 @@ export function SelectedStationMap({
     aerialResults,
     authoritativeName,
     correctionTarget,
+    endpointReviews,
     platformEdges,
     reviewKey,
   ]);
+  const cancelPrimaryPoint = () => {
+    if (!pendingPrimaryPoint) return;
+    const pending = pendingPrimaryPoint;
+    setPlatformEdges((current) =>
+      current.map((edge) =>
+        edge.id === pending.edgeId
+          ? {
+              ...edge,
+              geometry: pending.previousGeometry,
+              length: geometryLength(pending.previousGeometry),
+            }
+          : edge,
+      ),
+    );
+    const key = `${pending.edgeId}:${pending.endpoint}`;
+    setEndpointReviews((current) => {
+      const next = { ...current };
+      if (pending.previousReview) next[key] = pending.previousReview;
+      else delete next[key];
+      return next;
+    });
+    setPendingPrimaryPoint(null);
+    setLearningMessage(
+      'Entwurf verworfen – der bisherige Primärpunkt bleibt aktiv.',
+    );
+  };
+  const approvePrimaryPoint = async () => {
+    if (!pendingPrimaryPoint) return;
+    const pending = pendingPrimaryPoint;
+    const edge = platformEdges.find((item) => item.id === pending.edgeId);
+    if (!edge) return;
+    const analysis = aerialResults[pending.edgeId];
+    const features =
+      pending.endpoint === 'start'
+        ? analysis?.start_features
+        : analysis?.end_features;
+    setLearningMessage('Primärpunkt wird nach Railway gespeichert …');
+    try {
+      const response = await fetch(
+        `${API}/stations/aerial-analysis/training-feedback`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            track: `${authoritativeName}:${pending.track}`,
+            endpoint: pending.endpoint,
+            accepted: false,
+            features: features ?? {},
+            corrected_coordinate: {
+              latitude: pending.coordinate.lat,
+              longitude: pending.coordinate.lon,
+            },
+            promote_to_primary: true,
+          }),
+        },
+      );
+      if (!response.ok) throw new Error();
+      setCorrectedGeometries((drafts) => ({
+        ...drafts,
+        [pending.edgeId]: edge.geometry,
+      }));
+      setPendingPrimaryPoint(null);
+      setLearningMessage(
+        `Freigegeben: Gleis ${pending.track} ${pending.endpoint === 'start' ? 'Anfang' : 'Ende'} ist als Primärpunkt in Railway gespeichert.`,
+      );
+    } catch {
+      setLearningMessage(
+        'Speicherung in Railway fehlgeschlagen – der Punkt bleibt ein unbestätigter Entwurf.',
+      );
+    }
+  };
   useEffect(() => {
     setIdentity(null);
     setDbSources({});
@@ -1172,9 +1226,9 @@ export function SelectedStationMap({
             L.marker([point.lat, point.lon], {
               icon: L.divIcon({
                 className: 'corrected-endpoint-icon',
-                html: '<span aria-hidden="true"></span>',
-                iconSize: [22, 22],
-                iconAnchor: [11, 11],
+                html: `<span aria-hidden="true"></span><b>Gleis ${escapeHtml(currentReview.edge.track)}</b>`,
+                iconSize: [110, 18],
+                iconAnchor: [8, 8],
               }),
             })
               .bindTooltip(`${label}: richtiger Abschluss gesetzt`)
@@ -2027,6 +2081,40 @@ export function SelectedStationMap({
         <div className="endpoint-corridor-error" role="alert">
           {correctionError} Anfang und Ende müssen zur selben Bahnsteigkante
           gehören.
+        </div>
+      ) : null}
+      {pendingPrimaryPoint ? (
+        <div
+          className="primary-point-approval"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="primary-point-title"
+        >
+          <strong id="primary-point-title">
+            Neuen Punkt als Primärpunkt freigeben?
+          </strong>
+          <span>
+            Gleis {pendingPrimaryPoint.track} ·{' '}
+            {pendingPrimaryPoint.endpoint === 'start' ? 'Anfang' : 'Ende'} ·{' '}
+            {pendingPrimaryPoint.coordinate.lat.toFixed(6)},{' '}
+            {pendingPrimaryPoint.coordinate.lon.toFixed(6)}
+          </span>
+          <small>
+            Erst mit der Freigabe wird der Punkt dauerhaft in Railway
+            gespeichert und für weitere Prüfungen verwendet.
+          </small>
+          <div>
+            <button type="button" onClick={cancelPrimaryPoint}>
+              Entwurf verwerfen
+            </button>
+            <button
+              type="button"
+              className="primary-point-confirm"
+              onClick={() => void approvePrimaryPoint()}
+            >
+              Freigeben und speichern
+            </button>
+          </div>
         </div>
       ) : null}
       {currentReview ? (

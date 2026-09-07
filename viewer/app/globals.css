@@ -2328,15 +2328,20 @@ a:focus-visible {
   }
 }
 .corrected-endpoint-icon {
+  display: flex !important;
+  align-items: center;
+  gap: 5px;
   background: transparent !important;
   border: 0 !important;
 }
 
-.corrected-endpoint-icon span {
+.corrected-endpoint-icon > span {
   display: block;
-  width: 22px;
-  height: 22px;
-  border: 3px solid #063b55;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  box-sizing: border-box;
+  border: 2px solid #063b55;
   border-radius: 50%;
   background: repeating-linear-gradient(
     135deg,
@@ -2346,4 +2351,54 @@ a:focus-visible {
     #fff 7px
   );
   box-shadow: 0 1px 4px rgb(0 0 0 / 45%);
+}
+.corrected-endpoint-icon > b {
+  border-radius: 4px;
+  background: #063b55;
+  box-shadow: 0 1px 4px rgb(0 0 0 / 35%);
+  padding: 3px 5px;
+  color: #fff;
+  font-size: 0.68rem;
+  line-height: 1;
+  white-space: nowrap;
+}
+.primary-point-approval {
+  position: absolute;
+  z-index: 1200;
+  top: 76px;
+  right: 18px;
+  display: flex;
+  width: min(430px, calc(100% - 36px));
+  flex-direction: column;
+  gap: 7px;
+  border: 2px solid #08789a;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgb(7 39 55 / 28%);
+  padding: 14px 16px;
+  color: #183d4d;
+}
+.primary-point-approval > span,
+.primary-point-approval > small {
+  line-height: 1.4;
+}
+.primary-point-approval > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+.primary-point-approval button {
+  border: 1px solid #aebdc4;
+  border-radius: 5px;
+  background: #fff;
+  padding: 7px 10px;
+  color: #274653;
+  font-weight: 750;
+  cursor: pointer;
+}
+.primary-point-approval .primary-point-confirm {
+  border-color: #08789a;
+  background: #08789a;
+  color: #fff;
 }

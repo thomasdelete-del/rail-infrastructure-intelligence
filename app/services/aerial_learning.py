@@ -22,7 +22,8 @@ def feature_vector(features: dict[str, Any]) -> np.ndarray:
 def store_training_sample(track: str, endpoint: str, accepted: bool, features: dict[str, Any],
                           corrected_coordinate: dict[str, float] | None = None,
                           confirmed_coordinate: dict[str, float] | None = None,
-                          clear_corrected_coordinate: bool = False) -> int:
+                          clear_corrected_coordinate: bool = False,
+                          promote_to_primary: bool = False) -> int:
     observations = [{
         "object_key": f"FRI-OSM-platform-edge-{track}", "object_type": "platform_edge",
         "attribute": ATTRIBUTE,
@@ -43,6 +44,17 @@ def store_training_sample(track: str, endpoint: str, accepted: bool, features: d
             "is_derived": False, "note": "OSM-Endpunkt im amtlichen Luftbild bestätigt",
             "metadata": {"station": "Friedberg (Hess)", "imagery": "Hessen DOP20",
                          "original_source": "OpenStreetMap", "endpoint": endpoint},
+        })
+    if promote_to_primary and corrected_coordinate:
+        observations.append({
+            "object_key": f"FRI-OSM-platform-edge-{track}", "object_type": "platform_edge",
+            "attribute": f"primary_{endpoint}_coordinates", "value": corrected_coordinate,
+            "source_key": SOURCE_KEY, "source_publisher": "Manuelle Luftbildprüfung",
+            "source_type": "human_review", "quality_class": "A", "method": "approved_primary_coordinate",
+            "is_derived": False, "note": "Nach ausdrücklicher Freigabe als primärer Bahnsteigkantenpunkt gespeichert",
+            "metadata": {"station": track.rsplit(":", 1)[0] if ":" in track else "Friedberg (Hess)",
+                         "endpoint": endpoint, "approval": "explicit_user_confirmation",
+                         "replaces": "OpenStreetMap endpoint for application display"},
         })
     return store_observations(observations)
 
