@@ -63,3 +63,23 @@ def test_searches_db_netex_station_list(monkeypatch):
     monkeypatch.setattr(station_identity, "_netex_xml", fixture)
     result = asyncio.run(station_identity.search_netex_stations("Dorheim"))
     assert [item["station_number"] for item in result] == [1273]
+
+
+def test_stada_list_prefers_railway_snapshot_without_external_request(monkeypatch):
+    stored = [{
+        "station_number": 1930,
+        "name": "Friedberg (Hess)",
+        "eva": 8000111,
+        "ril": "FFG",
+        "latitude": 50.332,
+        "longitude": 8.761,
+        "stored_at": "2026-09-07T12:00:00Z",
+    }]
+    monkeypatch.setattr(station_identity, "_STADA_CACHE", None)
+    monkeypatch.setattr(station_identity, "load_station_locations", lambda: stored)
+    monkeypatch.delenv("DB_API_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DB_API_KEY", raising=False)
+
+    result = asyncio.run(station_identity.stada_station_list())
+
+    assert result == [{key: value for key, value in stored[0].items() if key != "stored_at"}]

@@ -8,6 +8,9 @@ from time import monotonic
 from typing import Any
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
+
+from app.repository import load_station_locations, store_station_locations_once
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 _NETEX_CACHE: tuple[float, bytes] | None = None
@@ -129,11 +132,22 @@ def normalize_stada_station(station: dict[str, Any]) -> dict[str, Any] | None:
 
 
 async def stada_station_list() -> list[dict[str, Any]]:
-    """Load StaDa master data at most once daily, as required for static data."""
+    """Read the Railway snapshot, creating it once from the StaDa primary source."""
     global _STADA_CACHE
     async with _STADA_CACHE_LOCK:
         if _STADA_CACHE is not None and monotonic() - _STADA_CACHE[0] < 86400:
             return _STADA_CACHE[1]
+        try:
+            stored = load_station_locations()
+        except (RuntimeError, SQLAlchemyError):
+            stored = []
+        if stored:
+            stations = [
+                {key: value for key, value in station.items() if key != "stored_at"}
+                for station in stored
+            ]
+            _STADA_CACHE = (monotonic(), stations)
+            return stations
         client_id, api_key = os.getenv("DB_API_CLIENT_ID"), os.getenv("DB_API_KEY")
         if not client_id or not api_key:
             raise RuntimeError("StaDa requires DB_API_CLIENT_ID and DB_API_KEY")
@@ -143,6 +157,10 @@ async def stada_station_list() -> list[dict[str, Any]]:
             response.raise_for_status()
         stations = [item for raw in response.json().get("result", []) if (item := normalize_stada_station(raw))]
         stations.sort(key=lambda item: item["name"].casefold())
+        try:
+            store_station_locations_once(stations)
+        except (RuntimeError, SQLAlchemyError):
+            pass
         _STADA_CACHE = (monotonic(), stations)
         return stations
 

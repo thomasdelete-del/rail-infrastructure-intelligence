@@ -10,7 +10,7 @@ from app.collectors.stada import StaDaCollector
 from app.collectors.fasta import FaStaCollector
 from app.collectors.rinf import RINFCollector
 from app.database import database_health
-from app.repository import load_infrastructure_inventory, load_source_freshness, summarize_infrastructure_inventory
+from app.repository import load_infrastructure_inventory, load_source_freshness, load_station_locations, summarize_infrastructure_inventory
 from app.seed.friedberg import FRIEDBERG
 from app.seed.friedberg_geometry import FRIEDBERG_GEOMETRY
 from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SOURCES
@@ -90,7 +90,13 @@ async def search_netex(query: str = Query(min_length=1, max_length=100), limit: 
 async def stations_stada_list():
     try:
         stations = await stada_station_list()
-        return {"source": "DB InfraGO StaDa", "stations": stations, "count": len(stations)}
+        stored_at = None
+        try:
+            stored = load_station_locations()
+            stored_at = stored[0].get("stored_at") if stored else None
+        except RuntimeError:
+            pass
+        return {"source": "DB InfraGO StaDa", "storage": "Railway PostgreSQL snapshot", "stored_at": stored_at, "stations": stations, "count": len(stations)}
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     except httpx.HTTPError as error:

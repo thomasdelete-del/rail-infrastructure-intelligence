@@ -8,6 +8,33 @@ from sqlalchemy import text
 from app.database import get_engine
 
 
+def load_station_locations() -> list[dict[str, Any]]:
+    """Read the immutable StaDa station-location snapshot hosted on Railway."""
+    sql = text('''
+        SELECT station_number, name, eva, ril, latitude, longitude, stored_at
+        FROM station_location_snapshot
+        ORDER BY lower(name), station_number
+    ''')
+    with get_engine().connect() as connection:
+        return [dict(row) for row in connection.execute(sql).mappings()]
+
+
+def store_station_locations_once(stations: list[dict[str, Any]]) -> int:
+    """Materialize StaDa locations once; existing station rows remain unchanged."""
+    if not stations:
+        return 0
+    sql = text('''
+        INSERT INTO station_location_snapshot
+            (station_number, name, eva, ril, latitude, longitude)
+        VALUES
+            (:station_number, :name, :eva, :ril, :latitude, :longitude)
+        ON CONFLICT (station_number) DO NOTHING
+    ''')
+    with get_engine().begin() as connection:
+        result = connection.execute(sql, stations)
+    return int(result.rowcount or 0)
+
+
 def load_source_freshness() -> dict[str, Any]:
     """Return source dates and the actual latest database write timestamp."""
     sql = text('''

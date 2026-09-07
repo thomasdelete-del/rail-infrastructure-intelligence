@@ -196,6 +196,29 @@ const belongsToPlatformSide = (
   );
 };
 
+const snapEndpointToPlatformEdge = (
+  point: { lat: number; lon: number },
+  geometry: Array<{ lat: number; lon: number }>,
+  endpoint: 'start' | 'end',
+) => {
+  if (geometry.length < 2) return point;
+  const first = endpoint === 'start' ? geometry[0] : geometry.at(-2)!;
+  const second = endpoint === 'start' ? geometry[1] : geometry.at(-1)!;
+  const latitudeScale = 111_320;
+  const longitudeScale = latitudeScale * Math.cos((first.lat * Math.PI) / 180);
+  const vectorX = (second.lon - first.lon) * longitudeScale;
+  const vectorY = (second.lat - first.lat) * latitudeScale;
+  const lengthSquared = vectorX * vectorX + vectorY * vectorY;
+  if (!lengthSquared) return endpoint === 'start' ? first : second;
+  const pointX = (point.lon - first.lon) * longitudeScale;
+  const pointY = (point.lat - first.lat) * latitudeScale;
+  const factor = (pointX * vectorX + pointY * vectorY) / lengthSquared;
+  return {
+    lat: first.lat + (factor * vectorY) / latitudeScale,
+    lon: first.lon + (factor * vectorX) / longitudeScale,
+  };
+};
+
 const platformAxis = (geometry: Array<{ lat: number; lon: number }>) => {
   let best:
     | [{ lat: number; lon: number }, { lat: number; lon: number }, number]
@@ -430,19 +453,27 @@ export function SelectedStationMap({
       event: { latlng: { lat: number; lng: number } },
       target: { edgeId: string; endpoint: 'start' | 'end'; track: string },
     ) => {
-      const coordinate = { lat: event.latlng.lat, lon: event.latlng.lng };
+      const requestedCoordinate = {
+        lat: event.latlng.lat,
+        lon: event.latlng.lng,
+      };
       const targetEdge = platformEdges.find(
         (edge) => edge.id === target.edgeId,
       );
       if (
         !targetEdge ||
-        !belongsToPlatformSide(coordinate, targetEdge, platformEdges)
+        !belongsToPlatformSide(requestedCoordinate, targetEdge, platformEdges)
       ) {
         setCorrectionError(
           `Punkt liegt nicht eindeutig auf der Bahnsteigkante von Gleis ${target.track}.`,
         );
         return;
       }
+      const coordinate = snapEndpointToPlatformEdge(
+        requestedCoordinate,
+        targetEdge.geometry,
+        target.endpoint,
+      );
       setCorrectionError(null);
       setPlatformEdges((current) =>
         current.map((edge) => {
@@ -1330,6 +1361,48 @@ export function SelectedStationMap({
               'Erkannter Abschluss liegt nicht eindeutig auf derselben Bahnsteigkante';
             delete result.candidate_start;
             delete result.candidate_end;
+          } else if (
+            existingEdge &&
+            result.candidate_start &&
+            result.candidate_end
+          ) {
+            const snappedStart = snapEndpointToPlatformEdge(
+              {
+                lat: result.candidate_start.latitude,
+                lon: result.candidate_start.longitude,
+              },
+              existingEdge.geometry,
+              'start',
+            );
+            const snappedEnd = snapEndpointToPlatformEdge(
+              {
+                lat: result.candidate_end.latitude,
+                lon: result.candidate_end.longitude,
+              },
+              existingEdge.geometry,
+              'end',
+            );
+            result.candidate_start = {
+              latitude: snappedStart.lat,
+              longitude: snappedStart.lon,
+            };
+            result.candidate_end = {
+              latitude: snappedEnd.lat,
+              longitude: snappedEnd.lon,
+            };
+            result.start_shift_m = distance(
+              existingEdge.geometry[0],
+              snappedStart,
+            );
+            result.end_shift_m = distance(
+              existingEdge.geometry.at(-1)!,
+              snappedEnd,
+            );
+            result.maximum_endpoint_shift_m = Math.max(
+              result.start_shift_m,
+              result.end_shift_m,
+            );
+            result.candidate_length_m = distance(snappedStart, snappedEnd);
           }
           const fallbackEdge =
             !existingEdge && result.candidate_start && result.candidate_end

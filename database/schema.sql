@@ -111,3 +111,18 @@ CREATE TABLE IF NOT EXISTS data_gap (
 CREATE INDEX IF NOT EXISTS idx_object_geometry ON infrastructure_object USING GIST (geometry);
 CREATE INDEX IF NOT EXISTS idx_observation_object_attribute ON observation(object_id, attribute);
 CREATE INDEX IF NOT EXISTS idx_observation_source ON observation(source_id);
+
+-- One-time StaDa snapshot used by the Germany map. StaDa remains the primary
+-- source; normal map requests read this Railway-hosted materialization only.
+CREATE TABLE IF NOT EXISTS station_location_snapshot (
+    station_number INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    eva BIGINT,
+    ril TEXT,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    source_key TEXT NOT NULL DEFAULT 'db-infrago-stada',
+    stored_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_station_location_snapshot_name
+    ON station_location_snapshot (name);
