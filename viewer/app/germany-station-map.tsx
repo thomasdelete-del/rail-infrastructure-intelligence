@@ -166,12 +166,12 @@ export function SelectedStationMap({
     const point = endpoint === 'start' ? edge.geometry[0] : edge.geometry.at(-1);
     setCorrectionError(null);
     setReviewKey(`${edge.id}:${endpoint}`);
-    setImagery(officialImageryAvailable ? 'official' : 'satellite');
+    setImagery(officialImageryStatus === 'active' ? 'official' : 'satellite');
     if (point) mapRef.current?.setView([point.lat, point.lon], 21, { animate: false });
   };
   const focusPlatformLength = (edge: PlatformEdge) => {
     setReviewKey(null);
-    setImagery(officialImageryAvailable ? 'official' : 'satellite');
+    setImagery(officialImageryStatus === 'active' ? 'official' : 'satellite');
     if (!edge.geometry.length) return;
     mapRef.current?.fitBounds(edge.geometry.map((point) => [point.lat, point.lon] as [number, number]), { padding: [70, 70], maxZoom: 19, animate: false });
   };
@@ -265,7 +265,11 @@ export function SelectedStationMap({
           attribution: 'Luftbild: &copy; Hessische Verwaltung für Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
         });
         officialRef.current.on('load', () => { if (!disposed) setOfficialImageryStatus('active'); });
-        officialRef.current.on('tileerror', () => { if (!disposed) setOfficialImageryStatus((current) => current === 'active' ? current : 'unavailable'); });
+        officialRef.current.on('tileerror', () => {
+          if (disposed) return;
+          setOfficialImageryStatus((current) => current === 'active' ? current : 'unavailable');
+          setImagery((current) => current === 'official' ? 'satellite' : current);
+        });
         officialRef.current.addTo(instance);
       }
       L.circleMarker([station.latitude, station.longitude], {
@@ -581,7 +585,7 @@ export function SelectedStationMap({
         />
         <div className="generic-map-controls map-controls" aria-label="Kartenebenen">
           <button type="button" className={imagery === 'satellite' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'satellite' ? 'none' : 'satellite')}><Satellite size={16}/><span>Satellit</span></button>
-          {officialImageryAvailable ? <button type="button" className={imagery === 'official' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'official' ? 'none' : 'official')}><Layers3 size={16}/><span>Amtliches Luftbild</span></button> : null}
+          {officialImageryAvailable ? <button type="button" className={imagery === 'official' ? 'map-toggle map-toggle-active' : 'map-toggle'} onClick={() => setImagery(imagery === 'official' ? 'none' : officialImageryStatus === 'active' ? 'official' : 'satellite')}><Layers3 size={16}/><span>Amtliches Luftbild</span></button> : null}
           {imagery !== 'none' ? <label className="opacity-control"><span>Deckkraft</span><input type="range" min="20" max="100" step="5" value={imageryOpacity} onChange={(event) => setImageryOpacity(Number(event.target.value))} aria-label="Deckkraft des Luftbilds"/><strong>{imageryOpacity}%</strong></label> : null}
           <button type="button" className="map-icon-button" onClick={() => mapRef.current?.setView([station.latitude, station.longitude], 17, { animate: false })} aria-label="Bahnhof zentrieren"><MapPin size={17}/></button>
         </div>
