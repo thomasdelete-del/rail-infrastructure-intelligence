@@ -1083,7 +1083,38 @@ export function SelectedStationMap({
           edges[0].track = '1';
           edges[0].trackSource = 'single_platform_fallback';
         }
-        edges.forEach((edge) => {
+        const displayEdges = edges.map((edge) => {
+          const rail = nearestRailForPlatform(edge, railTracks);
+          const railAlignedGeometry = edge.geometry.map((point) => ({
+            ...point,
+          }));
+          if (rail && railAlignedGeometry.length >= 2) {
+            railAlignedGeometry[0] = projectPointToGeometry(
+              railAlignedGeometry[0],
+              rail.geometry,
+            );
+            railAlignedGeometry[railAlignedGeometry.length - 1] =
+              projectPointToGeometry(
+                railAlignedGeometry.at(-1)!,
+                rail.geometry,
+              );
+          }
+          originalGeometriesRef.current[edge.id] = railAlignedGeometry;
+          const approvedGeometry = correctedGeometries[edge.id];
+          const geometry =
+            approvedGeometry?.length >= 2
+              ? approvedGeometry.map((point) => ({ ...point }))
+              : railAlignedGeometry;
+          if (rail && geometry.length >= 2) {
+            geometry[0] = projectPointToGeometry(geometry[0], rail.geometry);
+            geometry[geometry.length - 1] = projectPointToGeometry(
+              geometry.at(-1)!,
+              rail.geometry,
+            );
+          }
+          return { ...edge, geometry, length: geometryLength(geometry) };
+        });
+        displayEdges.forEach((edge) => {
           L.polyline(
             edge.geometry.map(
               (point) => [point.lat, point.lon] as [number, number],
@@ -1119,22 +1150,12 @@ export function SelectedStationMap({
             fillOpacity: 1,
           }).addTo(instance!);
         });
-        setCounts({ platforms: edges.length, entrances, equipment });
+        setCounts({ platforms: displayEdges.length, entrances, equipment });
         railTracksRef.current = railTracks;
-        edges.forEach((edge) => {
-          originalGeometriesRef.current[edge.id] = edge.geometry;
-        });
         setPlatformEdges(
-          edges
-            .map((edge) => {
-              const draft = correctedGeometries[edge.id];
-              return draft?.length >= 2
-                ? { ...edge, geometry: draft, length: geometryLength(draft) }
-                : edge;
-            })
-            .sort((a, b) =>
-              a.track.localeCompare(b.track, 'de', { numeric: true }),
-            ),
+          displayEdges.sort((a, b) =>
+            a.track.localeCompare(b.track, 'de', { numeric: true }),
+          ),
         );
       } catch {
         if (!disposed) {
