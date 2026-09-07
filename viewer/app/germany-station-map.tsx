@@ -138,7 +138,9 @@ export function SelectedStationMap({
   const [loading, setLoading] = useState(true);
   const [osmGeometryStatus, setOsmGeometryStatus] = useState<'loading' | 'active' | 'unavailable'>('loading');
   const [osmBaseMapStatus, setOsmBaseMapStatus] = useState<'loading' | 'active' | 'unavailable'>('loading');
+  const [satelliteStatus, setSatelliteStatus] = useState<'loading' | 'active' | 'unavailable'>('loading');
   const [officialImageryStatus, setOfficialImageryStatus] = useState<'loading' | 'active' | 'unavailable'>('loading');
+  const [sourceUpdated, setSourceUpdated] = useState<Record<string, Date>>({});
   const [reviewKey, setReviewKey] = useState<string | null>(null);
   const [endpointReviews, setEndpointReviews] = useState<Record<string, 'correct' | 'none' | 'corrected'>>({});
   const [osmConfirmed, setOsmConfirmed] = useState<Record<string, boolean>>({});
@@ -230,7 +232,7 @@ export function SelectedStationMap({
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
     void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
-      .then(async (raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); if (value.ril) { const platformParameters = new URLSearchParams({ name: value.matched_name || station.name, ril: value.ril }); const response = await fetch(`${API}/stations/platform-data?${platformParameters}`, { cache: 'no-store', signal: controller.signal }); if (response.ok) { const data = await response.json() as { platforms: AuthoritativePlatform[]; status: { db_infrago?: string; era_rinf?: string } }; setAuthoritativePlatforms(data.platforms); setDbSources((current) => ({ ...current, rinf: data.status.era_rinf })); } } })
+      .then(async (raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; const fetchedAt = new Date(); setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); setSourceUpdated((current) => ({ ...current, stada: fetchedAt, netex: fetchedAt, rinf: fetchedAt, fasta: fetchedAt })); if (value.ril) { const platformParameters = new URLSearchParams({ name: value.matched_name || station.name, ril: value.ril }); const response = await fetch(`${API}/stations/platform-data?${platformParameters}`, { cache: 'no-store', signal: controller.signal }); if (response.ok) { const data = await response.json() as { platforms: AuthoritativePlatform[]; status: { db_infrago?: string; era_rinf?: string } }; setAuthoritativePlatforms(data.platforms); setDbSources((current) => ({ ...current, rinf: data.status.era_rinf })); setSourceUpdated((current) => ({ ...current, rinf: new Date() })); } } })
       .then(() => setLastUpdated(new Date()))
       .catch((error: Error) => { if (error.name !== 'AbortError') { setIdentity(null); setDbSources({ stada: 'unavailable', netex: 'unavailable', rinf: 'unavailable', osm: 'unavailable', fasta: 'unavailable' }); setLoadError('Die Stationsstammdaten konnten nicht vollständig geladen werden.'); } });
     return () => controller.abort();
@@ -249,6 +251,7 @@ export function SelectedStationMap({
     setLoading(true);
     setOsmGeometryStatus('loading');
     setOsmBaseMapStatus('loading');
+    setSatelliteStatus('loading');
     setOfficialImageryStatus(officialImageryAvailable ? 'loading' : 'unavailable');
     setCounts({ platforms: 0, entrances: 0, equipment: 0 });
     setPlatformEdges([]);
@@ -266,7 +269,7 @@ export function SelectedStationMap({
         maxZoom: 24,
         attribution: '&copy; OpenStreetMap-Mitwirkende',
       });
-      osmBaseLayer.on('load', () => { if (!disposed) setOsmBaseMapStatus('active'); });
+      osmBaseLayer.on('load', () => { if (!disposed) { setOsmBaseMapStatus('active'); setSourceUpdated((current) => ({ ...current, osm: new Date() })); } });
       osmBaseLayer.on('tileerror', () => { if (!disposed) setOsmBaseMapStatus((current) => current === 'active' ? current : 'unavailable'); });
       osmBaseLayer.addTo(instance);
       mapRef.current = instance;
@@ -275,12 +278,14 @@ export function SelectedStationMap({
         maxNativeZoom: 19, maxZoom: 24, opacity: 0,
         attribution: 'Satellitenbild &copy; Esri, Maxar, Earthstar Geographics und weitere',
       }).addTo(instance);
+      satelliteRef.current.on('load', () => { if (!disposed) { setSatelliteStatus('active'); setSourceUpdated((current) => ({ ...current, satellite: new Date() })); } });
+      satelliteRef.current.on('tileerror', () => { if (!disposed) setSatelliteStatus((current) => current === 'active' ? current : 'unavailable'); });
       if (officialImageryAvailable) {
         officialRef.current = L.tileLayer.wms('https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows', {
           layers: 'he_dop20_rgb', format: 'image/png', transparent: true, version: '1.1.1', maxZoom: 24, opacity: 0,
           attribution: 'Luftbild: &copy; Hessische Verwaltung für Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
         });
-        officialRef.current.on('load', () => { if (!disposed) setOfficialImageryStatus('active'); });
+        officialRef.current.on('load', () => { if (!disposed) { setOfficialImageryStatus('active'); setSourceUpdated((current) => ({ ...current, official: new Date() })); } });
         officialRef.current.on('tileerror', () => {
           if (disposed) return;
           setOfficialImageryStatus((current) => current === 'active' ? current : 'unavailable');
@@ -566,14 +571,20 @@ export function SelectedStationMap({
       return fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: trainingTrack, endpoint, accepted: false, features: features ?? {}, corrected_coordinate: coordinate }) });
     })).then((responses) => { if (responses.some((response) => !response.ok)) throw new Error(); setLearningMessage('Beide Korrekturen wurden gespeichert.'); }).catch(() => setLearningMessage('Korrekturen lokal gespeichert; Lernserver derzeit nicht erreichbar.'));
   };
+  const sourceState = (status?: string) => status === undefined ? 'loading' : ['active', 'available_for_enrichment'].includes(status) ? 'active' : status === 'not_found' ? 'not_found' : 'unavailable';
   const sourceEntries = [
-    { name: 'DB InfraGO StaDa', quality: 'A', state: dbSources.stada === undefined ? 'loading' : dbSources.stada === 'active' ? 'active' : 'unavailable' },
-    { name: 'DB InfraGO OpenStation / NeTEx', quality: 'A', state: dbSources.netex === undefined ? 'loading' : dbSources.netex === 'active' ? 'active' : 'unavailable' },
-    { name: 'ERA Infrastrukturregister RINF', quality: 'A', state: dbSources.rinf === undefined ? 'loading' : dbSources.rinf === 'active' ? 'active' : 'unavailable' },
-    { name: 'OpenStreetMap', quality: 'D', state: osmBaseMapStatus },
-    { name: 'Amtliches Luftbild', quality: 'A', state: officialImageryStatus },
-    { name: 'DB InfraGO FaSta', quality: 'A', state: dbSources.fasta === undefined ? 'loading' : dbSources.fasta === 'active' ? 'active' : 'unavailable' },
+    { key: 'stada', name: 'DB InfraGO StaDa', quality: 'A', state: sourceState(dbSources.stada) },
+    { key: 'netex', name: 'DB InfraGO OpenStation / NeTEx', quality: 'A', state: sourceState(dbSources.netex) },
+    { key: 'rinf', name: 'ERA Infrastrukturregister RINF', quality: 'A', state: sourceState(dbSources.rinf) },
+    { key: 'osm', name: 'OpenStreetMap', quality: 'D', state: osmBaseMapStatus },
+    { key: 'satellite', name: 'Satellitenbild Esri / Maxar', quality: 'B', state: satelliteStatus },
+    { key: 'official', name: 'Amtliches Luftbild', quality: 'A', state: officialImageryStatus },
+    { key: 'fasta', name: 'DB InfraGO FaSta', quality: 'A', state: sourceState(dbSources.fasta) },
   ];
+  const sourceStatusLabel = (state: string) => state === 'active' ? 'Aktiv' : state === 'loading' ? 'Wird geladen' : state === 'not_found' ? 'Keine Stationsdaten' : 'Nicht erreichbar';
+  const sourceFreshness = (key: string, state: string) => sourceUpdated[key]
+    ? `Letzter erfolgreicher Abruf: ${sourceUpdated[key].toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' })}`
+    : state === 'loading' ? 'Aktualität wird ermittelt' : state === 'not_found' ? 'Quelle erreichbar, kein passender Datensatz' : 'Kein erfolgreicher Abruf in dieser Sitzung';
   const inventoryObjects = inventory?.objects ?? [];
   const inventoryCounts = Object.fromEntries(['platform', 'platform_edge', 'entrance', 'equipment'].map((type) => [type, inventoryObjects.filter((item) => item.object_type === type).length]));
   const normalizedInventoryQuery = normalizeSearch(inventoryQuery.trim());
@@ -665,7 +676,7 @@ export function SelectedStationMap({
       </div>
       <section className="generic-feature-card">
         <div className="generic-feature-heading"><div><h2>Datenquellen</h2><p>Aktive Verbindungen und Qualitätsklasse für {authoritativeName}</p></div><strong>{sourceEntries.filter((source) => source.state === 'active').length} von {sourceEntries.length} verbunden</strong></div>
-        <div className="source-grid">{sourceEntries.map((source) => <div className="source-row" key={source.name}><span className={`source-indicator ${source.state === 'active' ? 'source-active' : 'source-pending'}`}/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{source.name}</p><p className="mt-1 text-xs text-muted-foreground">Qualitätsklasse {source.quality}</p></div><span className={source.state === 'active' ? 'source-state-active' : 'source-state-pending'}>{source.state === 'active' ? 'Aktiv' : source.state === 'loading' ? 'Wird geladen' : 'Nicht verfügbar'}</span></div>)}</div>
+        <div className="source-grid">{sourceEntries.map((source) => <div className="source-row" key={source.name}><span className={`source-indicator ${source.state === 'active' ? 'source-active' : source.state === 'unavailable' ? 'source-error' : 'source-pending'}`}/><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{source.name}</p><p className="mt-1 text-xs text-muted-foreground">Qualitätsklasse {source.quality}</p><p className="source-freshness">{sourceFreshness(source.key, source.state)}</p></div><span className={source.state === 'active' ? 'source-state-active' : source.state === 'unavailable' ? 'source-state-error' : 'source-state-pending'}>{sourceStatusLabel(source.state)}</span></div>)}</div>
       </section>
       <section className="generic-feature-card">
         <div className="generic-feature-heading"><div><h2>Bahnsteigübersicht</h2><p>DB-Gleisnummern mit zugeordneten RINF-Infrastrukturkennungen</p></div><span className="status-ok"><ShieldCheck size={15}/>Identität geprüft</span></div>
