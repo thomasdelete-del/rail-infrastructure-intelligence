@@ -335,6 +335,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .endpoint-result-jump span b { font-size: .72rem; }
 .endpoint-result-jump span small { color: #60727c; font-family: var(--font-mono), monospace; font-size: .65rem; font-weight: 500; white-space: nowrap; }
 .endpoint-result-jump strong { color: #183d4d; font-size: .72rem; }
+.result-learning-status { margin-top: auto; color: #176944; font-size: .68rem; font-weight: 750; }
 .map-review-label { border: 0; border-radius: 4px; box-shadow: 0 1px 4px rgb(7 27 43 / .3); padding: 4px 7px; font-size: .72rem; font-weight: 800; }
 .map-review-osm { background: #fff4dc; color: #7d4a00; }
 .map-review-proposal { background: #dcf8ff; color: #00677c; }
