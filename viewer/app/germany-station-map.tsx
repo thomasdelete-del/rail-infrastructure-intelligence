@@ -61,6 +61,11 @@ type PlatformEdge = {
   length: number;
   height?: string;
 };
+type RailTrackGeometry = {
+  id: string;
+  ref?: string;
+  geometry: Array<{ lat: number; lon: number }>;
+};
 type AuthoritativePlatform = {
   track: string;
   platform_height_mm?: number | null;
@@ -196,27 +201,56 @@ const belongsToPlatformSide = (
   );
 };
 
-const snapEndpointToPlatformEdge = (
+const projectPointToGeometry = (
   point: { lat: number; lon: number },
   geometry: Array<{ lat: number; lon: number }>,
-  endpoint: 'start' | 'end',
 ) => {
-  if (geometry.length < 2) return point;
-  const first = endpoint === 'start' ? geometry[0] : geometry.at(-2)!;
-  const second = endpoint === 'start' ? geometry[1] : geometry.at(-1)!;
   const latitudeScale = 111_320;
-  const longitudeScale = latitudeScale * Math.cos((first.lat * Math.PI) / 180);
-  const vectorX = (second.lon - first.lon) * longitudeScale;
-  const vectorY = (second.lat - first.lat) * latitudeScale;
-  const lengthSquared = vectorX * vectorX + vectorY * vectorY;
-  if (!lengthSquared) return endpoint === 'start' ? first : second;
-  const pointX = (point.lon - first.lon) * longitudeScale;
-  const pointY = (point.lat - first.lat) * latitudeScale;
-  const factor = (pointX * vectorX + pointY * vectorY) / lengthSquared;
-  return {
-    lat: first.lat + (factor * vectorY) / latitudeScale,
-    lon: first.lon + (factor * vectorX) / longitudeScale,
-  };
+  const longitudeScale = latitudeScale * Math.cos((point.lat * Math.PI) / 180);
+  let nearest = point;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  geometry.slice(1).forEach((end, index) => {
+    const start = geometry[index];
+    const vectorX = (end.lon - start.lon) * longitudeScale;
+    const vectorY = (end.lat - start.lat) * latitudeScale;
+    const lengthSquared = vectorX * vectorX + vectorY * vectorY;
+    if (!lengthSquared) return;
+    const pointX = (point.lon - start.lon) * longitudeScale;
+    const pointY = (point.lat - start.lat) * latitudeScale;
+    const factor = Math.max(
+      0,
+      Math.min(1, (pointX * vectorX + pointY * vectorY) / lengthSquared),
+    );
+    const projected = {
+      lat: start.lat + (factor * vectorY) / latitudeScale,
+      lon: start.lon + (factor * vectorX) / longitudeScale,
+    };
+    const projectedDistance = distance(point, projected);
+    if (projectedDistance < nearestDistance) {
+      nearest = projected;
+      nearestDistance = projectedDistance;
+    }
+  });
+  return nearest;
+};
+
+const nearestRailForPlatform = (
+  edge: PlatformEdge,
+  rails: RailTrackGeometry[],
+) => {
+  const endpointSamples = [edge.geometry[0], edge.geometry.at(-1)!];
+  const exact = rails.filter((rail) => rail.ref && rail.ref === edge.track);
+  const candidates = exact.length ? exact : rails;
+  return candidates
+    .map((rail) => ({
+      rail,
+      distance: endpointSamples.reduce(
+        (sum, point) =>
+          sum + distance(point, projectPointToGeometry(point, rail.geometry)),
+        0,
+      ),
+    }))
+    .sort((left, right) => left.distance - right.distance)[0]?.rail;
 };
 
 const platformAxis = (geometry: Array<{ lat: number; lon: number }>) => {
@@ -244,6 +278,7 @@ export function SelectedStationMap({
   const originalGeometriesRef = useRef<
     Record<string, Array<{ lat: number; lon: number }>>
   >({});
+  const railTracksRef = useRef<RailTrackGeometry[]>([]);
   const satelliteRef = useRef<TileLayer | null>(null);
   const officialRef = useRef<TileLayer | null>(null);
   const [counts, setCounts] = useState({
@@ -477,10 +512,16 @@ export function SelectedStationMap({
         );
         return;
       }
-      const coordinate = snapEndpointToPlatformEdge(
+      const rail = nearestRailForPlatform(targetEdge, railTracksRef.current);
+      if (!rail) {
+        setCorrectionError(
+          `Für Gleis ${target.track} wurde keine Schienenachse gefunden.`,
+        );
+        return;
+      }
+      const coordinate = projectPointToGeometry(
         requestedCoordinate,
-        targetEdge.geometry,
-        target.endpoint,
+        rail.geometry,
       );
       const key = `${target.edgeId}:${target.endpoint}`;
       setPendingPrimaryPoint({
@@ -931,6 +972,7 @@ export function SelectedStationMap({
           equipment = 0;
         const explicitEdges: PlatformEdge[] = [];
         const platformCandidates: PlatformEdge[] = [];
+        const railTracks: RailTrackGeometry[] = [];
         const seen = new Set<string>();
         data.elements.forEach((item) => {
           const key = `${item.type}-${item.id}`;
@@ -942,10 +984,19 @@ export function SelectedStationMap({
             tags.railway === 'platform_edge' ||
             tags.public_transport === 'platform';
           const isPlatformEdge = tags.railway === 'platform_edge';
+          const isRailTrack = tags.railway === 'rail';
           const isStation = ['station', 'halt'].includes(tags.railway ?? '');
           const isEntrance =
             tags.railway === 'subway_entrance' || Boolean(tags.entrance);
           if (isStation) return;
+          if (isRailTrack && item.geometry?.length) {
+            railTracks.push({
+              id: `${item.type}-${item.id}`,
+              ref: tags.ref || tags.local_ref,
+              geometry: item.geometry,
+            });
+            return;
+          }
           if (isEntrance) entrances++;
           else if (!isPlatform) equipment++;
           if (item.geometry?.length && isPlatformEdge) {
@@ -1069,6 +1120,7 @@ export function SelectedStationMap({
           }).addTo(instance!);
         });
         setCounts({ platforms: edges.length, entrances, equipment });
+        railTracksRef.current = railTracks;
         edges.forEach((edge) => {
           originalGeometriesRef.current[edge.id] = edge.geometry;
         });
@@ -1420,21 +1472,34 @@ export function SelectedStationMap({
             result.candidate_start &&
             result.candidate_end
           ) {
-            const snappedStart = snapEndpointToPlatformEdge(
+            const rail = nearestRailForPlatform(
+              existingEdge,
+              railTracksRef.current,
+            );
+            if (!rail) {
+              result.status = 'check';
+              result.reason = 'Keine zugehörige OSM-Schienenachse gefunden';
+              delete result.candidate_start;
+              delete result.candidate_end;
+              setAerialResults((current) => ({
+                ...current,
+                [existingEdge.id]: result,
+              }));
+              return null;
+            }
+            const snappedStart = projectPointToGeometry(
               {
                 lat: result.candidate_start.latitude,
                 lon: result.candidate_start.longitude,
               },
-              existingEdge.geometry,
-              'start',
+              rail.geometry,
             );
-            const snappedEnd = snapEndpointToPlatformEdge(
+            const snappedEnd = projectPointToGeometry(
               {
                 lat: result.candidate_end.latitude,
                 lon: result.candidate_end.longitude,
               },
-              existingEdge.geometry,
-              'end',
+              rail.geometry,
             );
             result.candidate_start = {
               latitude: snappedStart.lat,
