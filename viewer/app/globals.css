@@ -170,6 +170,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .platform-row { display: flex; min-height: 76px; align-items: center; gap: 16px; border: 1px solid #d7e0e4; border-radius: 9px; background: linear-gradient(90deg, #f8fafb, #fff); padding: 14px 16px; }
 .platform-index { display: grid; height: 44px; width: 44px; flex: none; place-items: center; border-radius: 5px; background: #0b5278; color: white; font-family: var(--font-app-mono), monospace; font-weight: 600; }
 .track-pill { display: inline-flex; min-height: 30px; align-items: center; border-radius: 4px; border: 1px solid #d8932e; background: #fff4df; padding: 3px 10px; color: #70440b; font-family: var(--font-app-mono), monospace; font-size: .875rem; font-weight: 600; }
+.track-pill-button { width: fit-content; cursor: pointer; }
+.track-pill-button:hover, .track-pill-button:focus-visible { border-color: #70440b; background: #ffe8bd; box-shadow: 0 0 0 3px rgb(216 147 46 / 18%); outline: none; }
 .track-focus { cursor: pointer; }
 .track-focus:hover { border-color: #70440b; box-shadow: 0 0 0 2px rgb(216 147 46 / 18%); }
 .status-ok { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border-radius: 999px; background: #e8f6ef; padding: 4px 10px; color: #176944; font-size: .75rem; font-weight: 700; white-space: nowrap; }
