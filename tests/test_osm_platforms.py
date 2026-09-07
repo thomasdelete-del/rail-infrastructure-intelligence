@@ -6,6 +6,7 @@ def test_platform_query_requests_edges_and_platform_areas():
     assert "[railway=platform]" in query
     assert "[railway=platform_edge]" in query
     assert "[public_transport=platform][train=yes]" in query
+    assert "[railway=rail]" in query
 
 
 def test_filter_keeps_rail_platform_areas_but_rejects_bus_platforms():
@@ -18,4 +19,9 @@ def test_filter_keeps_rail_platform_areas_but_rejects_bus_platforms():
 
 def test_filter_keeps_train_platform_from_public_transport_schema():
     element = {"id": 3, "tags": {"public_transport": "platform", "train": "yes"}}
+    assert filter_rail_objects([element]) == [element]
+
+
+def test_filter_keeps_rail_geometry_used_to_find_track_facing_platform_side():
+    element = {"id": 4, "tags": {"railway": "rail", "ref": "1"}}
     assert filter_rail_objects([element]) == [element]

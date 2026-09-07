@@ -61,6 +61,10 @@ type PlatformEdge = {
   length: number;
   height?: string;
 };
+type RailTrackGeometry = {
+  ref?: string;
+  geometry: Array<{ lat: number; lon: number }>;
+};
 type AuthoritativePlatform = {
   track: string;
   platform_height_mm?: number | null;
@@ -240,6 +244,39 @@ const platformAxis = (geometry: Array<{ lat: number; lon: number }>) => {
     }),
   );
   return best;
+};
+
+const trackFacingPlatformEdge = (
+  boundary: Array<{ lat: number; lon: number }>,
+  rails: RailTrackGeometry[],
+  track: string,
+) => {
+  if (boundary.length < 2 || !rails.length) return null;
+  const matchingRails = rails.filter((rail) => rail.ref && rail.ref === track);
+  const candidates = matchingRails.length ? matchingRails : rails;
+  const rail = candidates
+    .map((candidate) => ({
+      candidate,
+      proximity: Math.min(
+        ...boundary.map((point) =>
+          distance(point, projectPointToGeometry(point, candidate.geometry)),
+        ),
+      ),
+    }))
+    .sort((left, right) => left.proximity - right.proximity)[0]?.candidate;
+  if (!rail) return null;
+  const measured = boundary.map((point) => ({
+    point,
+    distance: distance(point, projectPointToGeometry(point, rail.geometry)),
+  }));
+  const minimum = Math.min(...measured.map((item) => item.distance));
+  const maximum = Math.max(...measured.map((item) => item.distance));
+  const tolerance = Math.max(1.5, Math.min(5, (maximum - minimum) * 0.35));
+  const facingBoundary = measured
+    .filter((item) => item.distance <= minimum + tolerance)
+    .map((item) => item.point);
+  const axis = platformAxis(facingBoundary);
+  return axis && axis[2] >= 20 ? [axis[0], axis[1]] : null;
 };
 export function SelectedStationMap({
   station,
@@ -478,9 +515,16 @@ export function SelectedStationMap({
       const targetEdge = platformEdges.find(
         (edge) => edge.id === target.edgeId,
       );
+      const targetBoundary = targetEdge
+        ? (originalGeometriesRef.current[targetEdge.id] ?? targetEdge.geometry)
+        : [];
+      const snappingEdge = targetEdge
+        ? { ...targetEdge, geometry: targetBoundary }
+        : undefined;
       if (
         !targetEdge ||
-        !belongsToPlatformSide(requestedCoordinate, targetEdge, platformEdges)
+        !snappingEdge ||
+        !belongsToPlatformSide(requestedCoordinate, snappingEdge, platformEdges)
       ) {
         setCorrectionError(
           `Punkt liegt nicht eindeutig auf der Bahnsteigkante von Gleis ${target.track}.`,
@@ -489,7 +533,7 @@ export function SelectedStationMap({
       }
       const coordinate = projectPointToGeometry(
         requestedCoordinate,
-        targetEdge.geometry,
+        targetBoundary,
       );
       const key = `${target.edgeId}:${target.endpoint}`;
       setPendingPrimaryPoint({
@@ -940,6 +984,11 @@ export function SelectedStationMap({
           equipment = 0;
         const explicitEdges: PlatformEdge[] = [];
         const platformCandidates: PlatformEdge[] = [];
+        const platformAreas: Array<{
+          item: OsmElement;
+          tags: Record<string, string>;
+        }> = [];
+        const railTracks: RailTrackGeometry[] = [];
         const seen = new Set<string>();
         data.elements.forEach((item) => {
           const key = `${item.type}-${item.id}`;
@@ -955,7 +1004,14 @@ export function SelectedStationMap({
           const isEntrance =
             tags.railway === 'subway_entrance' || Boolean(tags.entrance);
           if (isStation) return;
-          if (tags.railway === 'rail') return;
+          if (tags.railway === 'rail') {
+            if (item.geometry?.length)
+              railTracks.push({
+                ref: tags.ref || tags.local_ref,
+                geometry: item.geometry,
+              });
+            return;
+          }
           if (isEntrance) entrances++;
           else if (!isPlatform) equipment++;
           if (item.geometry?.length && isPlatformEdge) {
@@ -979,27 +1035,7 @@ export function SelectedStationMap({
               item.geometry.map((p) => [p.lat, p.lon] as [number, number]),
               { color: '#0b5278', weight: 3, opacity: 0.55 },
             ).addTo(instance!);
-            const axis = platformAxis(item.geometry);
-            if (
-              axis &&
-              axis[2] >= 40 &&
-              (tags.railway === 'platform' ||
-                tags.public_transport === 'platform')
-            )
-              platformCandidates.push({
-                id: `${item.type}-${item.id}`,
-                track: tags.ref || tags.local_ref || '',
-                trackSource: tags.ref
-                  ? 'ref'
-                  : tags.local_ref
-                    ? 'local_ref'
-                    : 'unknown',
-                osmType: item.type,
-                osmId: item.id,
-                geometry: [axis[0], axis[1]],
-                length: axis[2],
-                height: tags.height,
-              });
+            platformAreas.push({ item, tags });
           } else {
             const lat = item.lat ?? item.center?.lat,
               lon = item.lon ?? item.center?.lon;
@@ -1024,6 +1060,35 @@ export function SelectedStationMap({
                 )
                 .addTo(instance!);
           }
+        });
+        platformAreas.forEach(({ item, tags }) => {
+          const track = tags.ref || tags.local_ref || '';
+          const geometry = trackFacingPlatformEdge(
+            item.geometry!,
+            railTracks,
+            track,
+          );
+          const fallbackAxis = platformAxis(item.geometry!);
+          const selectedGeometry =
+            geometry ??
+            (fallbackAxis && fallbackAxis[2] >= 40
+              ? [fallbackAxis[0], fallbackAxis[1]]
+              : null);
+          if (!selectedGeometry) return;
+          platformCandidates.push({
+            id: `${item.type}-${item.id}`,
+            track,
+            trackSource: tags.ref
+              ? 'ref'
+              : tags.local_ref
+                ? 'local_ref'
+                : 'unknown',
+            osmType: item.type,
+            osmId: item.id,
+            geometry: selectedGeometry,
+            length: geometryLength(selectedGeometry),
+            height: tags.height,
+          });
         });
         const edges = [...explicitEdges];
         const explicitTracks = new Set(
@@ -1439,19 +1504,22 @@ export function SelectedStationMap({
             result.candidate_start &&
             result.candidate_end
           ) {
+            const targetBoundary =
+              originalGeometriesRef.current[existingEdge.id] ??
+              existingEdge.geometry;
             const snappedStart = projectPointToGeometry(
               {
                 lat: result.candidate_start.latitude,
                 lon: result.candidate_start.longitude,
               },
-              existingEdge.geometry,
+              targetBoundary,
             );
             const snappedEnd = projectPointToGeometry(
               {
                 lat: result.candidate_end.latitude,
                 lon: result.candidate_end.longitude,
               },
-              existingEdge.geometry,
+              targetBoundary,
             );
             result.candidate_start = {
               latitude: snappedStart.lat,
