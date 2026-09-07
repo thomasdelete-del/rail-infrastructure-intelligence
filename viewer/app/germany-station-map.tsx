@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Layers3, MapPin, Satellite, Search, ShieldCheck, TrainFront } from 'lucide-react';
+import { AlertTriangle, Layers3, MapPin, RefreshCw, Satellite, Search, ShieldCheck, TrainFront } from 'lucide-react';
 import type { Map as LeafletMap, LayerGroup, TileLayer } from 'leaflet';
 const API = 'https://rail-infrastructure-intelligence-production.up.railway.app';
 export type Station = {
@@ -146,6 +146,11 @@ export function SelectedStationMap({
   const [aerialChecksRunning, setAerialChecksRunning] = useState(false);
   const [correctionTarget, setCorrectionTarget] = useState<{ edgeId: string; endpoint: 'start' | 'end'; track: string } | null>(null);
   const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const [correctedGeometries, setCorrectedGeometries] = useState<Record<string, Array<{ lat: number; lon: number }>>>({});
+  const [learningMessage, setLearningMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [refreshNonce, setRefreshNonce] = useState(0);
   const authoritativeName = identity?.name || station.name;
   const displayName = /bahnhof$/i.test(authoritativeName.trim())
     ? authoritativeName
@@ -155,13 +160,16 @@ export function SelectedStationMap({
     try {
       setOsmConfirmed(JSON.parse(localStorage.getItem(`station-osm-confirmed:${station.id}`) || '{}'));
       setEndpointReviews(JSON.parse(localStorage.getItem(`station-endpoint-reviews:${station.id}`) || '{}'));
+      setCorrectedGeometries(JSON.parse(localStorage.getItem(`station-coordinate-drafts:${station.id}`) || '{}'));
     } catch {
       setOsmConfirmed({});
       setEndpointReviews({});
+      setCorrectedGeometries({});
     }
   }, [station.id]);
   useEffect(() => { localStorage.setItem(`station-osm-confirmed:${station.id}`, JSON.stringify(osmConfirmed)); }, [osmConfirmed, station.id]);
   useEffect(() => { localStorage.setItem(`station-endpoint-reviews:${station.id}`, JSON.stringify(endpointReviews)); }, [endpointReviews, station.id]);
+  useEffect(() => { localStorage.setItem(`station-coordinate-drafts:${station.id}`, JSON.stringify(correctedGeometries)); }, [correctedGeometries, station.id]);
   const focusEndpoint = (edge: PlatformEdge, endpoint: 'start' | 'end') => {
     const point = endpoint === 'start' ? edge.geometry[0] : edge.geometry.at(-1);
     setCorrectionError(null);
@@ -193,13 +201,17 @@ export function SelectedStationMap({
         const geometry = [...edge.geometry];
         if (correctionTarget.endpoint === 'start') geometry[0] = coordinate;
         else geometry[geometry.length - 1] = coordinate;
+        setCorrectedGeometries((drafts) => ({ ...drafts, [edge.id]: geometry }));
         return { ...edge, geometry, length: geometryLength(geometry) };
       }));
       const key = `${correctionTarget.edgeId}:${correctionTarget.endpoint}`;
       setEndpointReviews((current) => ({ ...current, [key]: 'corrected' }));
       const analysis = aerialResults[correctionTarget.edgeId];
       const features = correctionTarget.endpoint === 'start' ? analysis?.start_features : analysis?.end_features;
-      void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${authoritativeName}:${correctionTarget.track}`, endpoint: correctionTarget.endpoint, accepted: false, features: features ?? {}, corrected_coordinate: { latitude: coordinate.lat, longitude: coordinate.lon } }) });
+      setLearningMessage('Korrektur wird als Lernbeispiel gespeichert …');
+      void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${authoritativeName}:${correctionTarget.track}`, endpoint: correctionTarget.endpoint, accepted: false, features: features ?? {}, corrected_coordinate: { latitude: coordinate.lat, longitude: coordinate.lon } }) })
+        .then((response) => { if (!response.ok) throw new Error(); setLearningMessage('Korrektur gespeichert – die Erkennung lernt aus diesem Beispiel.'); })
+        .catch(() => setLearningMessage('Korrektur lokal gespeichert; Lernserver derzeit nicht erreichbar.'));
       setCorrectionTarget(null);
     };
     map.on('click', handleClick);
@@ -213,23 +225,25 @@ export function SelectedStationMap({
     setSelectedObjectKey(null);
     setAerialResults({});
     setAerialChecksRunning(false);
+    setLoadError(null);
     const controller = new AbortController();
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
     void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
       .then(async (raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); if (value.ril) { const platformParameters = new URLSearchParams({ name: value.matched_name || station.name, ril: value.ril }); const response = await fetch(`${API}/stations/platform-data?${platformParameters}`, { cache: 'no-store', signal: controller.signal }); if (response.ok) { const data = await response.json() as { platforms: AuthoritativePlatform[]; status: { db_infrago?: string; era_rinf?: string } }; setAuthoritativePlatforms(data.platforms); setDbSources((current) => ({ ...current, rinf: data.status.era_rinf })); } } })
-      .catch((error: Error) => { if (error.name !== 'AbortError') { setIdentity(null); setDbSources({ stada: 'unavailable', netex: 'unavailable', rinf: 'unavailable', osm: 'unavailable', fasta: 'unavailable' }); } });
+      .then(() => setLastUpdated(new Date()))
+      .catch((error: Error) => { if (error.name !== 'AbortError') { setIdentity(null); setDbSources({ stada: 'unavailable', netex: 'unavailable', rinf: 'unavailable', osm: 'unavailable', fasta: 'unavailable' }); setLoadError('Die Stationsstammdaten konnten nicht vollständig geladen werden.'); } });
     return () => controller.abort();
-  }, [station]);
+  }, [station, refreshNonce]);
   useEffect(() => {
     const controller = new AbortController();
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
     void fetch(`${API}/stations/infrastructure?${parameters}`, { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
-      .then((data: StationInventory) => { setInventory(data); setSelectedObjectKey(data.objects[0]?.object_key ?? null); })
-      .catch((error: Error) => { if (error.name !== 'AbortError') setInventory({ station: station.name, object_count: 0, objects: [] }); });
+      .then((raw: unknown) => { const data = raw as StationInventory; setInventory(data); setSelectedObjectKey(data.objects[0]?.object_key ?? null); })
+      .catch((error: Error) => { if (error.name !== 'AbortError') { setInventory({ station: station.name, object_count: 0, objects: [] }); setLoadError((current) => current ?? 'Die NeTEx-Infrastruktur konnte nicht geladen werden.'); } });
     return () => controller.abort();
-  }, [station]);
+  }, [station, refreshNonce]);
   useEffect(() => {
     if (!el.current) return;
     setLoading(true);
@@ -365,9 +379,12 @@ export function SelectedStationMap({
           L.circleMarker([end.lat, end.lon], { radius: 5, color: '#fff', weight: 2, fillColor: '#d54532', fillOpacity: 1 }).addTo(instance!);
         });
         setCounts({ platforms: edges.length, entrances, equipment });
-        setPlatformEdges(edges.sort((a, b) => a.track.localeCompare(b.track, 'de', { numeric: true })));
+        setPlatformEdges(edges.map((edge) => {
+          const draft = correctedGeometries[edge.id];
+          return draft?.length >= 2 ? { ...edge, geometry: draft, length: geometryLength(draft) } : edge;
+        }).sort((a, b) => a.track.localeCompare(b.track, 'de', { numeric: true })));
       } catch {
-        if (!disposed) { setCounts({ platforms: 0, entrances: 0, equipment: 0 }); setOsmGeometryStatus('unavailable'); }
+        if (!disposed) { setCounts({ platforms: 0, entrances: 0, equipment: 0 }); setOsmGeometryStatus('unavailable'); setLoadError((current) => current ?? 'Die OSM-Infrastrukturgeometrie konnte nicht geladen werden.'); }
       } finally {
         if (!disposed) setLoading(false);
       }
@@ -380,7 +397,7 @@ export function SelectedStationMap({
       satelliteRef.current = null;
       officialRef.current = null;
     };
-  }, [displayName, officialImageryAvailable, station]);
+  }, [correctedGeometries, displayName, officialImageryAvailable, refreshNonce, station]);
   useEffect(() => {
     const opacity = imageryOpacity / 100;
     satelliteRef.current?.setOpacity(imagery === 'satellite' ? opacity : 0);
@@ -388,7 +405,7 @@ export function SelectedStationMap({
   }, [imagery, imageryOpacity]);
   const platformRows = useMemo(() => {
     const matched = new Set<string>();
-    const rows = authoritativePlatforms.map((data) => {
+    const rows: Array<{ track: string; edge?: PlatformEdge; data?: AuthoritativePlatform }> = authoritativePlatforms.map((data) => {
       const edge = platformEdges.find((candidate) => candidate.track === data.track);
       if (edge) matched.add(edge.id);
       return { track: data.track, edge, data };
@@ -499,7 +516,7 @@ export function SelectedStationMap({
       }
     })).then((fallbackEdges) => {
       if (!reviewEndpoints.length) {
-        const first = fallbackEdges.find((edge): edge is PlatformEdge => Boolean(edge));
+        const first = fallbackEdges.find(Boolean) as PlatformEdge | undefined;
         if (first) focusEndpoint(first, 'start');
       }
     }).finally(() => setAerialChecksRunning(false));
@@ -510,7 +527,10 @@ export function SelectedStationMap({
     setEndpointReviews((current) => ({ ...current, [currentReview.key]: status }));
     const point = currentReview.endpoint === 'start' ? currentReview.edge.geometry[0] : currentReview.edge.geometry.at(-1)!;
     const features = currentReview.endpoint === 'start' ? currentAerial?.start_features : currentAerial?.end_features;
-    void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${authoritativeName}:${currentReview.edge.track}`, endpoint: currentReview.endpoint, accepted: status === 'correct', features: features ?? {}, confirmed_coordinate: status === 'correct' ? { latitude: point.lat, longitude: point.lon } : null }) });
+    setLearningMessage('Bewertung wird als Lernbeispiel gespeichert …');
+    void fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: `${authoritativeName}:${currentReview.edge.track}`, endpoint: currentReview.endpoint, accepted: status === 'correct', features: features ?? {}, confirmed_coordinate: status === 'correct' ? { latitude: point.lat, longitude: point.lon } : null }) })
+      .then((response) => { if (!response.ok) throw new Error(); setLearningMessage('Bewertung gespeichert – die Erkennung lernt aus diesem Beispiel.'); })
+      .catch(() => setLearningMessage('Bewertung lokal gespeichert; Lernserver derzeit nicht erreichbar.'));
     if (status === 'none') {
       setCorrectionError(null);
       setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track });
@@ -520,14 +540,16 @@ export function SelectedStationMap({
     if (!currentReview || !currentAerial?.candidate_start || !currentAerial.candidate_end) return;
     const start = { lat: currentAerial.candidate_start.latitude, lon: currentAerial.candidate_start.longitude };
     const end = { lat: currentAerial.candidate_end.latitude, lon: currentAerial.candidate_end.longitude };
+    setCorrectedGeometries((drafts) => ({ ...drafts, [currentReview.edge.id]: [start, end] }));
     setPlatformEdges((current) => current.map((edge) => edge.id === currentReview.edge.id ? { ...edge, geometry: [start, end], length: geometryLength([start, end]) } : edge));
     setEndpointReviews((current) => ({ ...current, [`${currentReview.edge.id}:start`]: 'corrected', [`${currentReview.edge.id}:end`]: 'corrected' }));
     const trainingTrack = `${authoritativeName}:${currentReview.edge.track}`;
+    setLearningMessage('Beide Korrekturen werden als Lernbeispiele gespeichert …');
     void Promise.all((['start', 'end'] as const).map((endpoint) => {
       const coordinate = endpoint === 'start' ? currentAerial.candidate_start! : currentAerial.candidate_end!;
       const features = endpoint === 'start' ? currentAerial.start_features : currentAerial.end_features;
       return fetch(`${API}/stations/aerial-analysis/training-feedback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ track: trainingTrack, endpoint, accepted: false, features: features ?? {}, corrected_coordinate: coordinate }) });
-    }));
+    })).then((responses) => { if (responses.some((response) => !response.ok)) throw new Error(); setLearningMessage('Beide Korrekturen wurden gespeichert.'); }).catch(() => setLearningMessage('Korrekturen lokal gespeichert; Lernserver derzeit nicht erreichbar.'));
   };
   const sourceEntries = [
     { name: 'DB InfraGO StaDa', quality: 'A', state: dbSources.stada === undefined ? 'loading' : dbSources.stada === 'active' ? 'active' : 'unavailable' },
@@ -548,6 +570,31 @@ export function SelectedStationMap({
   const selectedInventoryObject = inventoryObjects.find((item) => item.object_key === selectedObjectKey) ?? filteredInventory[0] ?? null;
   const objectTitle = (item: InventoryObject) => String(item.observations.find((observation) => observation.attribute === 'name')?.value ?? objectTypeLabels[item.object_type] ?? item.object_type);
   const displayInventoryValue = (value: unknown, unit?: string | null) => `${typeof value === 'boolean' ? value ? 'Ja' : 'Nein' : String(value ?? 'Nicht geliefert')}${unit && unit !== 'degree' ? ` ${unit}` : ''}`;
+  const sourceLabel = (key: string) => ({ 'db-infrago-stada': 'DB InfraGO StaDa', 'db-open-station': 'DB OpenStation / NeTEx', 'era-rinf': 'ERA RINF', openstreetmap: 'OpenStreetMap', osm: 'OpenStreetMap', fasta: 'DB InfraGO FaSta' }[key.toLowerCase()] ?? key);
+  const latestObservations = (item: InventoryObject) => Array.from(new Map(item.observations.map((observation) => [`${observation.attribute}:${observation.source_key}`, observation])).values());
+  const focusInventoryObject = (item: InventoryObject) => {
+    setSelectedObjectKey(item.object_key);
+    const observation = (attribute: string) => item.observations.find((entry) => entry.attribute === attribute)?.value;
+    const latitude = Number(observation('latitude'));
+    const longitude = Number(observation('longitude'));
+    const track = String(observation('public_code') ?? '').trim();
+    const edge = track ? platformEdges.find((candidate) => candidate.track === track) : undefined;
+    if (edge) focusPlatformLength(edge);
+    else if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+      setImagery(officialImageryStatus === 'active' ? 'official' : 'satellite');
+      mapRef.current?.setView([latitude, longitude], 21, { animate: false });
+      requestAnimationFrame(() => el.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }));
+    }
+  };
+  const equipmentTypes = Array.from(new Set(inventoryObjects.filter((item) => item.object_type === 'equipment').map((item) => String(item.observations.find((entry) => entry.attribute === 'equipment_type')?.value ?? objectTitle(item))))).filter(Boolean);
+  const dataGaps = [
+    ...(!identity?.eva || !identity?.ril ? ['Stationskennung unvollständig'] : []),
+    ...(platformRows.some(({ edge }) => !edge) ? ['Bahnsteigkante nicht in OSM zugeordnet'] : []),
+    ...(platformRows.some(({ data }) => data?.net_construction_length_m == null) ? ['DB-Nettobaulänge fehlt'] : []),
+    ...(platformRows.some(({ data }) => data?.usable_length_m == null) ? ['RINF-Nutzlänge fehlt'] : []),
+    ...(inventoryCounts.entrance > 0 && counts.entrances === 0 ? ['Zugang nicht verortet'] : []),
+  ];
+  const conflictCount = lengthComparisons.filter((item) => item.level === 'high').length + Object.values(aerialResults).filter((item) => item.status === 'high').length;
   const mappingMethodLabel = (method?: string | null) => ({
     exact_platform_id: 'Gleiche Bahnsteigkennung',
     station_crosswalk: 'Bestätigter Stations-Crosswalk',
@@ -575,10 +622,9 @@ export function SelectedStationMap({
             Stationsstammdaten aus DB InfraGO StaDa; NeTEx und europäische Register ergänzen. OpenStreetMap liefert nachrangig die Geometrie.
           </p>
         </div>
-        <button type="button" onClick={onBack}>
-          Zur Deutschlandkarte
-        </button>
+        <div className="station-heading-actions"><button type="button" className="refresh-station" onClick={() => setRefreshNonce((value) => value + 1)}><RefreshCw size={15}/>Aktualisieren</button>{lastUpdated ? <small>Abruf {lastUpdated.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}</small> : null}<button type="button" onClick={onBack}>Zur Deutschlandkarte</button></div>
       </div>
+      {loadError ? <div className="station-load-error" role="alert"><AlertTriangle size={18}/><span>{loadError}</span><button type="button" onClick={() => setRefreshNonce((value) => value + 1)}>Erneut laden</button></div> : null}
       <div className="selected-station-map-wrap">
         <div
           ref={el}
@@ -595,11 +641,13 @@ export function SelectedStationMap({
       {correctionError ? <div className="endpoint-corridor-error" role="alert">{correctionError} Anfang und Ende müssen zur selben Bahnsteigkante gehören.</div> : null}
       {currentReview ? <div className="endpoint-review-nav generic-endpoint-review"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>Gleis {currentReview.edge.track} · {currentReview.endpoint === 'start' ? 'Anfang' : 'Ende'}</strong><span>{correctionTarget ? 'Richtigen Abschluss in der Karte anklicken' : endpointReviews[currentReview.key] === 'correct' ? 'Abschluss bestätigt' : endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : endpointReviews[currentReview.key] === 'none' ? 'Kein Abschluss – Korrektur erwartet' : currentAerial?.status === 'plausible' ? `Luftbild plausibel · ${Math.round(currentAerial.confidence * 100)}%` : currentAerial?.maximum_endpoint_shift_m != null ? `Abweichung ${currentAerial.maximum_endpoint_shift_m.toFixed(1)} m · ${Math.round(currentAerial.confidence * 100)}%` : aerialChecksRunning ? 'Amtliches Luftbild wird ausgewertet …' : currentAerial?.reason ?? 'Noch nicht geprüft'}</span>{currentAerial?.candidate_length_m != null ? <small>Erkannte Länge: {currentAerial.candidate_length_m.toFixed(1)} m</small> : null}<div className="endpoint-learning-actions"><button type="button" className={endpointReviews[currentReview.key] === 'correct' ? 'learning-correct-active' : ''} onClick={() => rateEndpoint('correct')}>Abschluss korrekt</button><button type="button" className={endpointReviews[currentReview.key] === 'none' ? 'learning-wrong-active' : ''} onClick={() => rateEndpoint('none')}>Kein Abschluss</button><button type="button" className={endpointReviews[currentReview.key] === 'corrected' ? 'learning-corrected-active' : ''} onClick={() => setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track })}>{endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : 'Richtigen Abschluss setzen'}</button></div></div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
       {currentReview && currentAerial?.candidate_start && currentAerial.candidate_end && currentAerial.status !== 'plausible' ? <button type="button" className="generic-aerial-apply" onClick={applyAerialSuggestion}>Luftbildvorschlag als beide Prüfpunkte übernehmen</button> : null}
+      {learningMessage ? <output className="learning-message">{learningMessage}</output> : null}
       <div className="generic-station-metrics">
+        <div><strong>{inventory?.object_count ?? '–'}</strong><span>Infrastrukturobjekte</span></div>
         <div><strong>{platformRows.length}</strong><span>Bahnsteigkanten</span></div>
         <div><strong>{counts.entrances}</strong><span>Zugänge</span></div>
         <div><strong>{counts.equipment}</strong><span>Ausstattung</span></div>
-        <div><strong>{identity?.stationNumber ?? '–'}</strong><span>DB-Stationsnummer</span></div>
+        <div><strong>{conflictCount}</strong><span>Aktuelle Konflikte</span></div>
       </div>
       <section className="generic-feature-card">
         <div className="generic-feature-heading"><div><h2>Datenquellen</h2><p>Aktive Verbindungen und Qualitätsklasse für {authoritativeName}</p></div><strong>{sourceEntries.filter((source) => source.state === 'active').length} von {sourceEntries.length} verbunden</strong></div>
@@ -613,6 +661,14 @@ export function SelectedStationMap({
         <div><strong>Bahnsteigdaten und Plausibilitätscheck</strong><span>OSM-Baulänge wird wie in Friedberg gegen die DB-Nettobaulänge geprüft; Anfang und Ende bleiben unabhängig prüfbar.</span></div>
         <div className="generic-check-actions"><div className="comparison-summary"><span className="comparison-low">{lengthComparisons.filter((item) => item.level === 'low').length} geringe</span><span className="comparison-check">{lengthComparisons.filter((item) => item.level === 'check').length} prüfen</span><span className="comparison-high">{lengthComparisons.filter((item) => item.level === 'high').length} auffällig</span></div><button type="button" className={reviewKey ? 'platform-check-switch platform-check-switch-on' : 'platform-check-switch'} onClick={startPlatformReview} disabled={!platformRows.length}><span aria-hidden="true"/>{aerialChecksRunning ? `Luftbildprüfung läuft (${Object.keys(aerialResults).length}/${Math.max(platformEdges.length, authoritativePlatforms.length)})` : reviewKey ? `Nächsten offenen Endpunkt prüfen (${reviewedEndpointCount}/${reviewEndpoints.length})` : 'Bahnsteigkanten prüfen'}</button></div>
       </div>
+      {reviewKey || Object.keys(aerialResults).length ? <div className="platform-check-results" aria-label="Ergebnisse der Bahnsteigkantenprüfung">{reviewEndpoints.map((item) => {
+        const result = aerialResults[item.edge.id];
+        const review = endpointReviews[item.key];
+        const shift = item.endpoint === 'start' ? result?.start_shift_m : result?.end_shift_m;
+        const probability = item.endpoint === 'start' ? result?.start_learned_probability : result?.end_learned_probability;
+        const level = review === 'correct' || (shift != null && shift <= 2) ? 'plausible' : shift != null && shift <= 5 ? 'check' : 'high';
+        return <button type="button" key={item.key} className={`platform-check-result platform-check-result-${level}`} onClick={() => focusEndpoint(item.edge, item.endpoint)}><strong>Gleis {item.edge.track} · {item.endpoint === 'start' ? 'Anfang' : 'Ende'}</strong><span>{review === 'correct' ? 'Abschluss bestätigt' : review === 'corrected' ? 'Richtiger Abschluss gesetzt' : review === 'none' ? 'Kein Abschluss – Korrektur offen' : shift != null ? `Abweichung ${shift.toFixed(1)} m` : aerialChecksRunning ? 'Wird geprüft …' : result?.reason ?? 'Noch nicht geprüft'}</span>{result ? <span>Konfidenz {Math.round((probability ?? result.confidence) * 100)}% · {result.training_sample_count ?? 0} Lernbeispiele</span> : null}<span>Im Luftbild prüfen</span></button>;
+      })}</div> : null}
       <div className="generic-platform-scroll">
         <table className="platform-data-table">
           <thead><tr><th>Gleis</th><th>Bahnsteighöhe</th><th>Baulänge OSM</th><th>OSM-Daten bestätigt</th><th>Nettobaulänge DB</th><th>Abweichung OSM–DB</th><th>Gleisbezogene Bahnsteignutzlänge</th><th>Anfang Geokoordinaten</th><th>Ende Geokoordinaten</th></tr></thead>
@@ -627,6 +683,7 @@ export function SelectedStationMap({
         </table>
       </div>
       <div className="platform-data-note"><ShieldCheck size={16}/><p>OSM-Geometrie, DB-Nettobaulänge und RINF-Nutzlänge bleiben getrennte Quellen. Bestätigungen und Endpunktkorrekturen werden je Station gespeichert; auffällige Werte werden nicht automatisch überschrieben.</p></div>
+      <section className="pilot-summary-grid" aria-label="Qualitätsübersicht"><div><h3>Datenlücken</h3>{dataGaps.length ? <ul>{dataGaps.map((gap) => <li key={gap}>{gap}</li>)}</ul> : <p className="summary-ok">Keine automatischen Datenlücken erkannt.</p>}</div><div><h3>Ausstattungstypen</h3>{equipmentTypes.length ? <ul>{equipmentTypes.map((type) => <li key={type}>{type}</li>)}</ul> : <p>Keine Ausstattungstypen geliefert.</p>}</div></section>
       <section className="generic-feature-card station-master-card">
         <div className="generic-feature-heading"><div><h2>Stammdaten und Matching</h2><p>Station, Betriebsstelle und Gleise mit Herkunft und nachvollziehbarer Zuordnung</p></div></div>
         <div className="station-master-scroll">
@@ -646,8 +703,8 @@ export function SelectedStationMap({
       <section className="object-catalog generic-object-catalog">
         <div className="catalog-toolbar"><div><h2>Objektkatalog</h2><p>Infrastruktur durchsuchen und Evidenz im Detail prüfen</p></div><div className="catalog-search"><Search size={17}/><input value={inventoryQuery} onChange={(event) => setInventoryQuery(event.target.value)} placeholder="Name, Gleis oder NeTEx-ID" aria-label="Objektkatalog durchsuchen"/></div></div>
         <div className="catalog-filters" aria-label="Objekttyp filtern">{[['all','Alle'],['platform','Bahnsteig'],['platform_edge','Bahnsteigkante'],['entrance','Zugang'],['equipment','Ausstattung']].map(([type, label]) => <button type="button" key={type} className={inventoryType === type ? 'active' : ''} onClick={() => setInventoryType(type)}>{label}{type !== 'all' ? <span>{inventoryCounts[type] ?? 0}</span> : null}</button>)}</div>
-        <div className="catalog-body"><div className="object-list" role="list" aria-label={`${filteredInventory.length} gefundene Objekte`}><p className="catalog-result-count">{filteredInventory.length} Objekte</p>{filteredInventory.map((item) => <button role="listitem" type="button" key={item.object_key} onClick={() => setSelectedObjectKey(item.object_key)} className={selectedInventoryObject?.object_key === item.object_key ? 'object-row object-row-active' : 'object-row'} aria-current={selectedInventoryObject?.object_key === item.object_key ? 'true' : undefined}><span className={`type-dot type-${item.object_type}`}/><span><strong>{objectTitle(item)}</strong><small>{objectTypeLabels[item.object_type] ?? item.object_type} · {item.observations.length} Werte</small></span><span aria-hidden="true">›</span></button>)}{inventory === null ? <div className="catalog-empty">NeTEx-Infrastruktur wird geladen …</div> : !filteredInventory.length ? <div className="catalog-empty">Keine passenden Objekte gefunden</div> : null}</div>
-        <div className="object-detail">{selectedInventoryObject ? <><span className="object-type-badge">{objectTypeLabels[selectedInventoryObject.object_type] ?? selectedInventoryObject.object_type}</span><h3>{objectTitle(selectedInventoryObject)}</h3><code>{selectedInventoryObject.object_key}</code><table><thead><tr><th>Attribut</th><th>Wert</th><th>Quelle</th></tr></thead><tbody>{selectedInventoryObject.observations.map((observation, index) => <tr key={`${observation.attribute}-${index}`}><td>{inventoryAttributeLabels[observation.attribute] ?? observation.attribute.replaceAll('_', ' ')}</td><td><strong>{displayInventoryValue(observation.value, observation.unit)}</strong></td><td><span className="evidence-source">DB OpenStation</span></td></tr>)}</tbody></table></> : <div className="catalog-empty">Objekt auswählen</div>}</div></div>
+        <div className="catalog-body"><div className="object-list" role="list" aria-label={`${filteredInventory.length} gefundene Objekte`}><p className="catalog-result-count">{filteredInventory.length} Objekte</p>{filteredInventory.map((item) => <button role="listitem" type="button" key={item.object_key} onClick={() => focusInventoryObject(item)} className={selectedInventoryObject?.object_key === item.object_key ? 'object-row object-row-active' : 'object-row'} aria-current={selectedInventoryObject?.object_key === item.object_key ? 'true' : undefined}><span className={`type-dot type-${item.object_type}`}/><span><strong>{objectTitle(item)}</strong><small>{objectTypeLabels[item.object_type] ?? item.object_type} · {latestObservations(item).length} Werte</small></span><span aria-hidden="true">›</span></button>)}{inventory === null ? <div className="catalog-empty">NeTEx-Infrastruktur wird geladen …</div> : !filteredInventory.length ? <div className="catalog-empty">Keine passenden Objekte gefunden</div> : null}</div>
+        <div className="object-detail">{selectedInventoryObject ? <><span className="object-type-badge">{objectTypeLabels[selectedInventoryObject.object_type] ?? selectedInventoryObject.object_type}</span><h3>{objectTitle(selectedInventoryObject)}</h3><code>{selectedInventoryObject.object_key}</code><table><thead><tr><th>Attribut</th><th>Wert</th><th>Quelle</th></tr></thead><tbody>{latestObservations(selectedInventoryObject).map((observation, index) => <tr key={`${observation.attribute}-${observation.source_key}-${index}`}><td>{inventoryAttributeLabels[observation.attribute] ?? observation.attribute.replaceAll('_', ' ')}</td><td><strong>{displayInventoryValue(observation.value, observation.unit)}</strong></td><td><span className="evidence-source">{sourceLabel(observation.source_key)}</span></td></tr>)}</tbody></table></> : <div className="catalog-empty">Objekt auswählen</div>}</div></div>
       </section>
     </section>
   );
