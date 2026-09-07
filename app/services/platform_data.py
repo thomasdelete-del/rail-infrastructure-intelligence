@@ -247,10 +247,10 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?lineId ?platform ?platformId ?length W
     platforms = []
     for row in db_platforms:
         usable = by_track.get(row["track"])
-        platforms.append({**row, "usable_length_m": usable["usable_length_m"] if usable else None, "rinf_platform_id": usable["platform_id"] if usable else None, "rinf_track_id": usable.get("track_id") if usable else None, "rinf_line_number": usable.get("line_number") if usable else None, "mapping_method": usable.get("mapping_method") if usable else None, "mapping_confidence": usable.get("mapping_confidence") if usable else None, "mapping_score": usable.get("mapping_score") if usable else None, "mapping_evidence": usable.get("mapping_evidence") if usable else []})
+        platforms.append({**row, "usable_length_m": usable["usable_length_m"] if usable else None, "rinf_platform_id": usable["platform_id"] if usable else None, "rinf_track_id": usable.get("track_id") if usable else None, "rinf_directional_track_ids": usable.get("directional_track_ids", []) if usable else [], "rinf_line_number": usable.get("line_number") if usable else None, "mapping_method": usable.get("mapping_method") if usable else None, "mapping_confidence": usable.get("mapping_confidence") if usable else None, "mapping_score": usable.get("mapping_score") if usable else None, "mapping_evidence": usable.get("mapping_evidence") if usable else []})
     for row in rinf_platforms:
         if row["platform_id"] not in used_rinf_ids:
-            platforms.append({"track": row["platform_id"], "platform_height_mm": None, "net_construction_length_m": None, "usable_length_m": row["usable_length_m"], "rinf_platform_id": row["platform_id"], "rinf_track_id": row.get("track_id"), "mapping_method": "unmapped", "mapping_confidence": "unresolved"})
+            platforms.append({"track": row["platform_id"], "platform_height_mm": None, "net_construction_length_m": None, "usable_length_m": row["usable_length_m"], "rinf_platform_id": row["platform_id"], "rinf_track_id": row.get("track_id"), "rinf_directional_track_ids": row.get("directional_track_ids", []), "rinf_line_number": row.get("line_number"), "mapping_method": "unmapped", "mapping_confidence": "unresolved"})
     return {
         "station": name,
         "ril": safe_ril,

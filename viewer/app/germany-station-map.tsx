@@ -68,6 +68,7 @@ type AuthoritativePlatform = {
   usable_length_m?: number | null;
   rinf_platform_id?: string | null;
   rinf_track_id?: string | null;
+  rinf_directional_track_ids?: string[] | null;
   rinf_line_number?: string | null;
   mapping_method?: string | null;
   mapping_confidence?: string | null;
@@ -1772,14 +1773,57 @@ export function SelectedStationMap({
       value: 'In den angebundenen Stationsdaten nicht geliefert',
       source: 'DB InfraGO / NeTEx',
     },
-    ...platformRows.map(({ track, data }) => ({
-      subject: 'Gleis',
-      attribute: `Gleis ${track}`,
-      value: data?.rinf_platform_id
-        ? `RINF-Bahnsteigkennung ${data.rinf_platform_id}`
-        : 'RINF-Bahnsteigkennung nicht zugeordnet',
-      source: data?.rinf_platform_id ? 'DB InfraGO + ERA RINF' : 'DB InfraGO',
-    })),
+    ...platformRows.flatMap(({ track, data }) => {
+      const rinfSource = 'ERA RINF · rinf-plus';
+      const subject = `ERA-Bahnsteigkante · DB Gleis ${track}`;
+      return [
+        {
+          subject: 'Gleis',
+          attribute: `DB-Gleis ${track}`,
+          value: data?.rinf_platform_id
+            ? `RINF platformId ${data.rinf_platform_id}`
+            : 'RINF-Bahnsteigkante nicht zugeordnet',
+          source: data?.rinf_platform_id
+            ? 'DB InfraGO + ERA RINF'
+            : 'DB InfraGO',
+        },
+        {
+          subject,
+          attribute: 'RINF platformId',
+          value: data?.rinf_platform_id ?? 'Nicht geliefert oder zugeordnet',
+          source: rinfSource,
+        },
+        {
+          subject,
+          attribute: 'Bahnsteignutzlänge',
+          value:
+            data?.usable_length_m != null
+              ? `${data.usable_length_m.toFixed(1)} m`
+              : 'Nicht geliefert',
+          source: rinfSource,
+        },
+        {
+          subject,
+          attribute: 'RINF-Gleiskennungen je Richtung',
+          value: data?.rinf_directional_track_ids?.length
+            ? data.rinf_directional_track_ids.join(' · ')
+            : (data?.rinf_track_id ?? 'Nicht geliefert'),
+          source: rinfSource,
+        },
+        {
+          subject,
+          attribute: 'Nationale Streckennummer',
+          value: data?.rinf_line_number ?? 'Nicht geliefert',
+          source: rinfSource,
+        },
+        {
+          subject,
+          attribute: 'Zuordnung zum DB-Gleis',
+          value: `${mappingMethodLabel(data?.mapping_method)}${data?.mapping_score != null ? ` · ${data.mapping_score} Punkte` : ''}${data?.mapping_evidence?.length ? ` · ${data.mapping_evidence.join(' · ')}` : ''}`,
+          source: rinfSource,
+        },
+      ];
+    }),
   ];
   return (
     <section className="selected-station-card">
