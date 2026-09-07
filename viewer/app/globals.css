@@ -129,6 +129,7 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .station-load-error span { flex: 1; }
 .station-load-error button { border: 1px solid currentColor; border-radius: 6px; background: #fff; padding: 6px 10px; font-weight: 700; }
 .learning-message { margin: -48px 14px 16px auto; width: max-content; max-width: calc(100% - 28px); border: 1px solid #a8d7bf; border-radius: 6px; background: #edf8f2; padding: 8px 12px; color: #176944; font-size: .78rem; font-weight: 700; }
+.review-learning-message { margin-top: 5px; border-left: 3px solid #20845a; background: #edf8f2; padding: 5px 7px; color: #176944; font-size: .7rem; font-weight: 750; }
 .pilot-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; border-bottom: 1px solid var(--border); background: #f6f9fa; padding: 18px 24px; }
 .pilot-summary-grid > div { border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 15px 17px; }
 .pilot-summary-grid h3 { margin: 0 0 9px; font-size: .9rem; }

@@ -451,8 +451,23 @@ export function SelectedStationMap({
           .bindTooltip(`Geprüfte Bahnsteigkante · Gleis ${escapeHtml(currentReview.edge.track)}`)
           .addTo(target);
         const start = geometry[0], end = geometry.at(-1)!;
-        L.circleMarker([start.lat, start.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#20a464', fillOpacity: 1 }).bindTooltip('Geprüfter Anfang').addTo(target);
-        L.circleMarker([end.lat, end.lon], { radius: 8, color: '#fff', weight: 3, fillColor: '#d54532', fillOpacity: 1 }).bindTooltip('Geprüftes Ende').addTo(target);
+        const endpointMarker = (endpoint: 'start' | 'end', point: { lat: number; lon: number }) => {
+          const status = endpointReviews[`${currentReview.edge.id}:${endpoint}`];
+          const baseColor = endpoint === 'start' ? '#20a464' : '#d54532';
+          const label = endpoint === 'start' ? 'Anfang' : 'Ende';
+          if (status === 'corrected') {
+            L.circleMarker([point.lat, point.lon], { radius: 11, color: '#063b55', weight: 3, fillColor: '#00c7df', fillOpacity: 1 }).bindTooltip(`${label}: richtiger Abschluss gesetzt`).addTo(target);
+            L.circleMarker([point.lat, point.lon], { radius: 3, color: '#fff', weight: 2, fillColor: '#fff', fillOpacity: 1, interactive: false }).addTo(target);
+          } else if (status === 'correct') {
+            L.circleMarker([point.lat, point.lon], { radius: 9, color: '#fff', weight: 3, fillColor: '#20845a', fillOpacity: 1 }).bindTooltip(`${label}: bestätigt`).addTo(target);
+          } else if (status === 'none') {
+            L.circleMarker([point.lat, point.lon], { radius: 10, color: '#c23b30', weight: 4, fillColor: '#fff', fillOpacity: .75, dashArray: '3 3' }).bindTooltip(`${label}: kein Abschluss – Korrektur offen`).addTo(target);
+          } else {
+            L.circleMarker([point.lat, point.lon], { radius: 8, color: '#fff', weight: 3, fillColor: baseColor, fillOpacity: 1 }).bindTooltip(`Geprüfter ${label}`).addTo(target);
+          }
+        };
+        endpointMarker('start', start);
+        endpointMarker('end', end);
       }
       if (!currentAerial?.candidate_start || !currentAerial.candidate_end) return;
       const candidateStart = [currentAerial.candidate_start.latitude, currentAerial.candidate_start.longitude] as [number, number];
@@ -470,7 +485,7 @@ export function SelectedStationMap({
         .addTo(target);
     });
     return () => { disposed = true; layer.clearLayers(); };
-  }, [currentAerial, currentReview]);
+  }, [currentAerial, currentReview, endpointReviews]);
   const navigateReview = (direction: -1 | 1) => {
     if (!reviewEndpoints.length) return;
     const next = reviewEndpoints[(reviewIndex + direction + reviewEndpoints.length) % reviewEndpoints.length];
@@ -639,9 +654,8 @@ export function SelectedStationMap({
         </div>
       </div>
       {correctionError ? <div className="endpoint-corridor-error" role="alert">{correctionError} Anfang und Ende müssen zur selben Bahnsteigkante gehören.</div> : null}
-      {currentReview ? <div className="endpoint-review-nav generic-endpoint-review"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>Gleis {currentReview.edge.track} · {currentReview.endpoint === 'start' ? 'Anfang' : 'Ende'}</strong><span>{correctionTarget ? 'Richtigen Abschluss in der Karte anklicken' : endpointReviews[currentReview.key] === 'correct' ? 'Abschluss bestätigt' : endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : endpointReviews[currentReview.key] === 'none' ? 'Kein Abschluss – Korrektur erwartet' : currentAerial?.status === 'plausible' ? `Luftbild plausibel · ${Math.round(currentAerial.confidence * 100)}%` : currentAerial?.maximum_endpoint_shift_m != null ? `Abweichung ${currentAerial.maximum_endpoint_shift_m.toFixed(1)} m · ${Math.round(currentAerial.confidence * 100)}%` : aerialChecksRunning ? 'Amtliches Luftbild wird ausgewertet …' : currentAerial?.reason ?? 'Noch nicht geprüft'}</span>{currentAerial?.candidate_length_m != null ? <small>Erkannte Länge: {currentAerial.candidate_length_m.toFixed(1)} m</small> : null}<div className="endpoint-learning-actions"><button type="button" className={endpointReviews[currentReview.key] === 'correct' ? 'learning-correct-active' : ''} onClick={() => rateEndpoint('correct')}>Abschluss korrekt</button><button type="button" className={endpointReviews[currentReview.key] === 'none' ? 'learning-wrong-active' : ''} onClick={() => rateEndpoint('none')}>Kein Abschluss</button><button type="button" className={endpointReviews[currentReview.key] === 'corrected' ? 'learning-corrected-active' : ''} onClick={() => setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track })}>{endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : 'Richtigen Abschluss setzen'}</button></div></div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
+      {currentReview ? <div className="endpoint-review-nav generic-endpoint-review"><button type="button" onClick={() => navigateReview(-1)} aria-label="Vorherigen Endpunkt prüfen">‹</button><div><strong>Gleis {currentReview.edge.track} · {currentReview.endpoint === 'start' ? 'Anfang' : 'Ende'}</strong><span>{correctionTarget ? 'Richtigen Abschluss in der Karte anklicken' : endpointReviews[currentReview.key] === 'correct' ? 'Abschluss bestätigt' : endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : endpointReviews[currentReview.key] === 'none' ? 'Kein Abschluss – Korrektur erwartet' : currentAerial?.status === 'plausible' ? `Luftbild plausibel · ${Math.round(currentAerial.confidence * 100)}%` : currentAerial?.maximum_endpoint_shift_m != null ? `Abweichung ${currentAerial.maximum_endpoint_shift_m.toFixed(1)} m · ${Math.round(currentAerial.confidence * 100)}%` : aerialChecksRunning ? 'Amtliches Luftbild wird ausgewertet …' : currentAerial?.reason ?? 'Noch nicht geprüft'}</span>{currentAerial?.candidate_length_m != null ? <small>Erkannte Länge: {currentAerial.candidate_length_m.toFixed(1)} m</small> : null}{currentAerial ? <small>Lernmodell: {currentAerial.training_sample_count ?? 0} Bewertungen</small> : null}<div className="endpoint-learning-actions"><button type="button" className={endpointReviews[currentReview.key] === 'correct' ? 'learning-correct-active' : ''} onClick={() => rateEndpoint('correct')}>Abschluss korrekt</button><button type="button" className={endpointReviews[currentReview.key] === 'none' ? 'learning-wrong-active' : ''} onClick={() => rateEndpoint('none')}>Kein Abschluss</button><button type="button" className={endpointReviews[currentReview.key] === 'corrected' ? 'learning-corrected-active' : ''} onClick={() => setCorrectionTarget({ edgeId: currentReview.edge.id, endpoint: currentReview.endpoint, track: currentReview.edge.track })}>{endpointReviews[currentReview.key] === 'corrected' ? 'Richtiger Abschluss gesetzt' : 'Richtigen Abschluss setzen'}</button></div>{learningMessage ? <output className="review-learning-message">{learningMessage}</output> : null}</div><button type="button" onClick={() => navigateReview(1)} aria-label="Nächsten Endpunkt prüfen">›</button></div> : null}
       {currentReview && currentAerial?.candidate_start && currentAerial.candidate_end && currentAerial.status !== 'plausible' ? <button type="button" className="generic-aerial-apply" onClick={applyAerialSuggestion}>Luftbildvorschlag als beide Prüfpunkte übernehmen</button> : null}
-      {learningMessage ? <output className="learning-message">{learningMessage}</output> : null}
       <div className="generic-station-metrics">
         <div><strong>{inventory?.object_count ?? '–'}</strong><span>Infrastrukturobjekte</span></div>
         <div><strong>{platformRows.length}</strong><span>Bahnsteigkanten</span></div>
