@@ -88,6 +88,7 @@ def parse_rinf_lengths(data: dict[str, Any]) -> list[dict[str, Any]]:
             "platform_id": platform_id,
             "track_id": value("trackId"),
             "directional_track_ids": [],
+            "line_number": value("lineId") or value("lineNationalId"),
             "usable_length_m": length,
             "uopid": value("uopid"),
             "source_url": source_url,
@@ -111,6 +112,53 @@ def map_rinf_platforms(db_platforms: list[dict[str, Any]], rinf_platforms: list[
         if rinf_id in rinf_by_id and any(row["track"] == db_track for row in db_platforms):
             mapped[db_track] = {**rinf_by_id[rinf_id], "mapping_method": "station_crosswalk", "mapping_confidence": "confirmed", "mapping_score": 100, "mapping_evidence": [f"station_crosswalk:{ril}:{rinf_id}->{db_track}"]}
             used.add(rinf_id)
+
+    # rinf-plus duplicates running tracks per direction. A track identifier is
+    # usable only when it points to exactly one remaining platform edge.
+    for db in [row for row in db_platforms if row["track"] not in mapped]:
+        candidates = []
+        for row in rinf_platforms:
+            if row["platform_id"] in used:
+                continue
+            track_ids = row.get("directional_track_ids") or [row.get("track_id")]
+            normalized_tokens = {
+                token
+                for track_id in track_ids
+                if track_id
+                for token in re.split(r"[^0-9A-Za-z]+", str(track_id))
+                if token
+            }
+            if db["track"].casefold() in {token.casefold() for token in normalized_tokens}:
+                candidates.append(row)
+        if len(candidates) == 1:
+            row = candidates[0]
+            mapped[db["track"]] = {
+                **row,
+                "mapping_method": "exact_rinf_track_id",
+                "mapping_confidence": "derived",
+                "mapping_score": 90,
+                "mapping_evidence": [f"rinf_track_id_contains_db_track:{db['track']}"],
+            }
+            used.add(row["platform_id"])
+
+    # A national line number is supporting infrastructure evidence, not a
+    # platform number. It is accepted only for a unique one-to-one remainder.
+    for db in [row for row in db_platforms if row["track"] not in mapped and row.get("line_number")]:
+        candidates = [
+            row for row in rinf_platforms
+            if row["platform_id"] not in used
+            and str(row.get("line_number") or "").casefold() == str(db["line_number"]).casefold()
+        ]
+        if len(candidates) == 1:
+            row = candidates[0]
+            mapped[db["track"]] = {
+                **row,
+                "mapping_method": "unique_line_number",
+                "mapping_confidence": "derived",
+                "mapping_score": 80,
+                "mapping_evidence": [f"unique_national_line:{db['line_number']}"],
+            }
+            used.add(row["platform_id"])
     remaining_db = [row for row in db_platforms if row["track"] not in mapped]
     remaining_rinf = [row for row in rinf_platforms if row["platform_id"] not in used]
     if len(remaining_db) == len(remaining_rinf) == 1:
@@ -139,10 +187,11 @@ async def load_platform_data(name: str, ril: str) -> dict[str, Any]:
     today = date.today().isoformat()
     query = f'''PREFIX era: <http://data.europa.eu/949/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
-SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
+SELECT DISTINCT ?opLabel ?uopid ?trackId ?lineId ?platform ?platformId ?length WHERE {{
   ?op a era:OperationalPoint ; rdfs:label ?opLabel ; era:uopid ?uopid ; era:track ?track .
   ?track era:trackId ?trackId ; era:platformEdge ?platform .
   ?platform era:platformId ?platformId ; era:lengthOfPlatform ?length .
+  OPTIONAL {{ ?track era:lineNationalId ?line . ?line era:lineId ?lineId }}
   OPTIONAL {{ ?platform era:validityStartDate ?validFrom }}
   OPTIONAL {{ ?platform era:validityEndDate ?validTo }}
   FILTER(STRENDS(STR(?uopid), "{safe_ril}"))
@@ -198,7 +247,7 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
     platforms = []
     for row in db_platforms:
         usable = by_track.get(row["track"])
-        platforms.append({**row, "usable_length_m": usable["usable_length_m"] if usable else None, "rinf_platform_id": usable["platform_id"] if usable else None, "rinf_track_id": usable.get("track_id") if usable else None, "mapping_method": usable.get("mapping_method") if usable else None, "mapping_confidence": usable.get("mapping_confidence") if usable else None, "mapping_score": usable.get("mapping_score") if usable else None, "mapping_evidence": usable.get("mapping_evidence") if usable else []})
+        platforms.append({**row, "usable_length_m": usable["usable_length_m"] if usable else None, "rinf_platform_id": usable["platform_id"] if usable else None, "rinf_track_id": usable.get("track_id") if usable else None, "rinf_line_number": usable.get("line_number") if usable else None, "mapping_method": usable.get("mapping_method") if usable else None, "mapping_confidence": usable.get("mapping_confidence") if usable else None, "mapping_score": usable.get("mapping_score") if usable else None, "mapping_evidence": usable.get("mapping_evidence") if usable else []})
     for row in rinf_platforms:
         if row["platform_id"] not in used_rinf_ids:
             platforms.append({"track": row["platform_id"], "platform_height_mm": None, "net_construction_length_m": None, "usable_length_m": row["usable_length_m"], "rinf_platform_id": row["platform_id"], "rinf_track_id": row.get("track_id"), "mapping_method": "unmapped", "mapping_confidence": "unresolved"})

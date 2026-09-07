@@ -100,3 +100,31 @@ def test_restores_friedberg_pilot_platform_length_crosswalk():
     assert all(mapped[track]["platform_id"] == track for track in tracks)
     assert all(mapped[track]["mapping_method"] == "station_crosswalk" for track in tracks)
     assert all(mapped[track]["mapping_score"] == 100 for track in tracks)
+
+
+def test_maps_unique_rinf_directional_track_identifier_to_db_track():
+    db = [{"track": "4"}, {"track": "7"}]
+    rinf = [
+        {"platform_id": "P-A", "directional_track_ids": ["direction_4_A", "direction_4_B"], "usable_length_m": 210},
+        {"platform_id": "P-B", "directional_track_ids": ["direction_7_A", "direction_7_B"], "usable_length_m": 190},
+    ]
+
+    mapped, used = map_rinf_platforms(db, rinf, "TEST")
+
+    assert mapped["4"]["platform_id"] == "P-A"
+    assert mapped["4"]["mapping_method"] == "exact_rinf_track_id"
+    assert mapped["7"]["platform_id"] == "P-B"
+    assert used == {"P-A", "P-B"}
+
+
+def test_line_number_mapping_requires_unique_candidate():
+    db = [{"track": "1", "line_number": "3900"}]
+    rinf = [
+        {"platform_id": "A", "line_number": "3900", "usable_length_m": 200},
+    ]
+
+    mapped, used = map_rinf_platforms(db, rinf, "TEST")
+
+    assert mapped["1"]["platform_id"] == "A"
+    assert mapped["1"]["mapping_method"] == "unique_line_number"
+    assert used == {"A"}

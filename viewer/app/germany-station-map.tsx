@@ -68,6 +68,7 @@ type AuthoritativePlatform = {
   usable_length_m?: number | null;
   rinf_platform_id?: string | null;
   rinf_track_id?: string | null;
+  rinf_line_number?: string | null;
   mapping_method?: string | null;
   mapping_confidence?: string | null;
   mapping_score?: number | null;
@@ -1729,6 +1730,8 @@ export function SelectedStationMap({
   const mappingMethodLabel = (method?: string | null) =>
     ({
       exact_platform_id: 'Gleiche Bahnsteigkennung',
+      exact_rinf_track_id: 'Eindeutige RINF-Gleiskennung',
+      unique_line_number: 'Eindeutige Streckennummer',
       station_crosswalk: 'Bestätigter Stations-Crosswalk',
       bijective_remainder: 'Eindeutige Restzuordnung',
       cached_reference: 'Letzter bestätigter Stations-Crosswalk',
@@ -2667,6 +2670,9 @@ export function SelectedStationMap({
                           ? `${data.usable_length_m.toFixed(1)} m`
                           : 'nicht geliefert'}
                       </span>
+                      {data?.rinf_line_number ? (
+                        <span>Streckennummer: {data.rinf_line_number}</span>
+                      ) : null}
                     </div>
                     <div>
                       <b>Luftbildprüfung</b>
