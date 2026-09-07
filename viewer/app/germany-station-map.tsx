@@ -57,6 +57,8 @@ type AuthoritativePlatform = {
   rinf_track_id?: string | null;
   mapping_method?: string | null;
   mapping_confidence?: string | null;
+  mapping_score?: number | null;
+  mapping_evidence?: string[] | null;
 };
 type InventoryObservation = { attribute: string; value: unknown; unit?: string | null; source_key: string; provenance?: Record<string, unknown> };
 type InventoryObject = { object_key: string; object_type: string; parent_object_key?: string | null; depth: number; observations: InventoryObservation[] };
@@ -213,7 +215,7 @@ export function SelectedStationMap({
     const parameters = new URLSearchParams({ name: station.name, latitude: String(station.latitude), longitude: String(station.longitude) });
     void fetch(`${API}/stations/dynamic-sources?${parameters}`, { cache: 'no-store', signal: controller.signal })
       .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
-      .then(async (raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); if (value.ril) { const platformParameters = new URLSearchParams({ name: value.matched_name || station.name, ril: value.ril }); const response = await fetch(`${API}/stations/platform-data?${platformParameters}`, { cache: 'no-store', signal: controller.signal }); if (response.ok) { const data = await response.json() as { platforms: AuthoritativePlatform[]; status: { era_rinf?: string } }; setAuthoritativePlatforms(data.platforms); setDbSources((current) => ({ ...current, rinf: data.status.era_rinf })); } } })
+      .then(async (raw: unknown) => { const bundle = raw as { identity: { matched_name?: string; eva?: string; ril?: string; station_number?: string; osm_type?: string; osm_id?: number }; sources?: { netex?: { status?: string }; era_rinf?: { status?: string }; openstreetmap?: { status?: string }; stada?: { status?: string }; fasta?: { status?: string; facility_count?: number } } }; const value = bundle.identity; setIdentity({ name: value.matched_name, eva: value.eva, ril: value.ril, stationNumber: value.station_number, osm: value.osm_type && value.osm_id ? `${value.osm_type}/${value.osm_id}` : undefined }); setDbSources({ netex: bundle.sources?.netex?.status, rinf: bundle.sources?.era_rinf?.status, osm: bundle.sources?.openstreetmap?.status, stada: bundle.sources?.stada?.status, fasta: bundle.sources?.fasta?.status, facilities: bundle.sources?.fasta?.facility_count }); if (value.ril) { const platformParameters = new URLSearchParams({ name: value.matched_name || station.name, ril: value.ril }); const response = await fetch(`${API}/stations/platform-data?${platformParameters}`, { cache: 'no-store', signal: controller.signal }); if (response.ok) { const data = await response.json() as { platforms: AuthoritativePlatform[]; status: { db_infrago?: string; era_rinf?: string } }; setAuthoritativePlatforms(data.platforms); setDbSources((current) => ({ ...current, rinf: data.status.era_rinf })); } } })
       .catch((error: Error) => { if (error.name !== 'AbortError') { setIdentity(null); setDbSources({ stada: 'unavailable', netex: 'unavailable', rinf: 'unavailable', osm: 'unavailable', fasta: 'unavailable' }); } });
     return () => controller.abort();
   }, [station]);
@@ -540,6 +542,23 @@ export function SelectedStationMap({
   const selectedInventoryObject = inventoryObjects.find((item) => item.object_key === selectedObjectKey) ?? filteredInventory[0] ?? null;
   const objectTitle = (item: InventoryObject) => String(item.observations.find((observation) => observation.attribute === 'name')?.value ?? objectTypeLabels[item.object_type] ?? item.object_type);
   const displayInventoryValue = (value: unknown, unit?: string | null) => `${typeof value === 'boolean' ? value ? 'Ja' : 'Nein' : String(value ?? 'Nicht geliefert')}${unit && unit !== 'degree' ? ` ${unit}` : ''}`;
+  const mappingMethodLabel = (method?: string | null) => ({
+    exact_platform_id: 'Gleiche Bahnsteigkennung',
+    station_crosswalk: 'Bestätigter Stations-Crosswalk',
+    bijective_remainder: 'Eindeutige Restzuordnung',
+    unmapped: 'Keine belastbare Zuordnung',
+  }[method ?? ''] ?? 'Noch nicht zugeordnet');
+  const mappingResultLabel = (data?: AuthoritativePlatform) => data?.rinf_platform_id
+    ? `RINF ${data.rinf_platform_id} → DB Gleis ${data.track}`
+    : `DB Gleis ${data?.track ?? '–'} ohne RINF-Zuordnung`;
+  const stationMasterRows = [
+    { subject: 'Station', attribute: 'Stationsname', value: authoritativeName, source: 'DB InfraGO StaDa' },
+    { subject: 'Station', attribute: 'DB-Stationsnummer', value: identity?.stationNumber ?? 'Nicht geliefert', source: 'DB InfraGO StaDa' },
+    { subject: 'Station', attribute: 'EVA / IBNR', value: identity?.eva ?? 'Nicht geliefert', source: 'DB InfraGO StaDa' },
+    { subject: 'Strecke / Betriebsstelle', attribute: 'RIL 100', value: identity?.ril ?? 'Nicht geliefert', source: 'DB InfraGO StaDa' },
+    { subject: 'Strecke / Betriebsstelle', attribute: 'Streckenzuordnung', value: 'In den angebundenen Stationsdaten nicht geliefert', source: 'DB InfraGO / NeTEx' },
+    ...platformRows.map(({ track, data }) => ({ subject: 'Gleis', attribute: `Gleis ${track}`, value: data?.rinf_platform_id ? `RINF-Bahnsteigkennung ${data.rinf_platform_id}` : 'RINF-Bahnsteigkennung nicht zugeordnet', source: data?.rinf_platform_id ? 'DB InfraGO + ERA RINF' : 'DB InfraGO' })),
+  ];
   return (
     <section className="selected-station-card">
       <div className="selected-station-heading">
@@ -549,20 +568,6 @@ export function SelectedStationMap({
           <p>
             Stationsstammdaten aus DB InfraGO StaDa; NeTEx und europäische Register ergänzen. OpenStreetMap liefert nachrangig die Geometrie.
           </p>
-          <div className="selected-station-meta">
-            <span>DB InfraGO StaDa: {dbSources.stada ?? 'wird geprüft'} · Primärquelle</span>
-            <span>DB InfraGO NeTEx: {dbSources.netex ?? 'wird geprüft'} · Infrastrukturergänzung</span>
-            <span>ERA RINF: {dbSources.rinf ?? 'wird geprüft'} · amtliche Ergänzung</span>
-            <span>OpenStreetMap: {dbSources.osm ?? 'wird geprüft'} · nur Geometrie/Gegenprüfung</span>
-            <span>
-              {loading
-                ? 'Infrastruktur wird geladen …'
-                : `${counts.platforms} Bahnsteige · ${counts.entrances} Zugänge · ${counts.equipment} Ausstattung`}
-            </span>
-            {identity ? <><span>OSM-ID: {identity.osm}</span><span>EVA/IBNR: {identity.eva ?? 'nicht gepflegt'}</span><span>RIL100: {identity.ril ?? 'nicht gepflegt'}</span><span>DB-Stationsnummer: {identity.stationNumber ?? 'nicht gepflegt'}</span></> : <span>Stationskennung konnte nicht eindeutig ermittelt werden</span>}
-            <span>{identity?.eva || identity?.ril || identity?.stationNumber ? 'Identitäts-Gate: Kennung gefunden' : 'DB-Quellen: eindeutige Kennung fehlt'}</span>
-            <span>DB FaSta: {dbSources.fasta ?? 'wird geprüft'}{dbSources.facilities !== undefined ? ` · ${dbSources.facilities} Anlagen` : ''}</span>
-          </div>
         </div>
         <button type="button" onClick={onBack}>
           Zur Deutschlandkarte
@@ -616,6 +621,22 @@ export function SelectedStationMap({
         </table>
       </div>
       <div className="platform-data-note"><ShieldCheck size={16}/><p>OSM-Geometrie, DB-Nettobaulänge und RINF-Nutzlänge bleiben getrennte Quellen. Bestätigungen und Endpunktkorrekturen werden je Station gespeichert; auffällige Werte werden nicht automatisch überschrieben.</p></div>
+      <section className="generic-feature-card station-master-card">
+        <div className="generic-feature-heading"><div><h2>Stammdaten und Matching</h2><p>Station, Betriebsstelle und Gleise mit Herkunft und nachvollziehbarer Zuordnung</p></div></div>
+        <div className="station-master-scroll">
+          <table className="station-master-table">
+            <thead><tr><th>Bereich</th><th>Merkmal</th><th>Wert</th><th>Quelle</th></tr></thead>
+            <tbody>{stationMasterRows.map((row, index) => <tr key={`${row.subject}-${row.attribute}-${index}`}><td><strong>{row.subject}</strong></td><td>{row.attribute}</td><td>{row.value}</td><td><span className="evidence-source">{row.source}</span></td></tr>)}</tbody>
+          </table>
+        </div>
+        <div className="matching-workflow-heading"><h3>Matching-Workflow und Ergebnis</h3><p>Die Zuordnung bleibt quellengetrennt und wird nur bei ausreichender Evidenz übernommen.</p></div>
+        <div className="station-master-scroll">
+          <table className="station-master-table matching-workflow-table">
+            <thead><tr><th>DB-Gleis</th><th>Eingangsdaten</th><th>Prüfschritte</th><th>Ergebnis</th><th>Status</th></tr></thead>
+            <tbody>{platformRows.map(({ track, edge, data }) => <tr key={`workflow-${track}`}><td><span className="track-pill">Gleis {track}</span></td><td><span>DB InfraGO Gleis {track}</span><br/><span>{edge ? `OSM ${edge.trackSource === 'ref' ? 'ref' : edge.trackSource === 'local_ref' ? 'local_ref' : 'Geometrie'}=${edge.track}` : 'Keine OSM-Kante'}</span><br/><span>{data?.rinf_platform_id ? `RINF ${data.rinf_platform_id}` : 'Kein RINF-Kandidat'}</span></td><td><ol><li>Stationskennung abgleichen</li><li>Gleis-/Bahnsteigkennung prüfen</li><li>Räumliche Lage und Längen plausibilisieren</li></ol><strong>{mappingMethodLabel(data?.mapping_method)}</strong></td><td><strong>{mappingResultLabel(data)}</strong>{data?.mapping_evidence?.length ? <small>{data.mapping_evidence.join(' · ')}</small> : null}</td><td><span className={`matching-status matching-status-${data?.mapping_confidence === 'confirmed' ? 'confirmed' : data?.mapping_confidence === 'derived' ? 'derived' : 'open'}`}>{data?.mapping_confidence === 'confirmed' ? 'Bestätigt' : data?.mapping_confidence === 'derived' ? 'Eindeutig abgeleitet' : 'Offen'}{data?.mapping_score != null ? ` · ${data.mapping_score} Punkte` : ''}</span></td></tr>)}{!loading && !platformRows.length ? <tr><td colSpan={5}><span className="data-missing">Keine Gleise für den Matching-Workflow gefunden.</span></td></tr> : null}</tbody>
+          </table>
+        </div>
+      </section>
       <section className="object-catalog generic-object-catalog">
         <div className="catalog-toolbar"><div><h2>Objektkatalog</h2><p>Infrastruktur durchsuchen und Evidenz im Detail prüfen</p></div><div className="catalog-search"><Search size={17}/><input value={inventoryQuery} onChange={(event) => setInventoryQuery(event.target.value)} placeholder="Name, Gleis oder NeTEx-ID" aria-label="Objektkatalog durchsuchen"/></div></div>
         <div className="catalog-filters" aria-label="Objekttyp filtern">{[['all','Alle'],['platform','Bahnsteig'],['platform_edge','Bahnsteigkante'],['entrance','Zugang'],['equipment','Ausstattung']].map(([type, label]) => <button type="button" key={type} className={inventoryType === type ? 'active' : ''} onClick={() => setInventoryType(type)}>{label}{type !== 'all' ? <span>{inventoryCounts[type] ?? 0}</span> : null}</button>)}</div>

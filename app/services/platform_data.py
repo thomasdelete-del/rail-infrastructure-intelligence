@@ -121,26 +121,37 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
   FILTER(!BOUND(?validFrom) || ?validFrom <= "{today}"^^<http://www.w3.org/2001/XMLSchema#date>)
   FILTER(!BOUND(?validTo) || ?validTo >= "{today}"^^<http://www.w3.org/2001/XMLSchema#date>)
 }} ORDER BY ?platformId'''
+    page_url: str | None = None
+    db_platforms: list[dict[str, Any]] = []
+    rinf_platforms: list[dict[str, Any]] = []
+    db_failed = False
+    rinf_failed = False
     async with httpx.AsyncClient(timeout=90, follow_redirects=True, headers={"User-Agent": "rail-infrastructure-intelligence/1.4"}) as client:
-        index = await _equipment_index(client)
-        normalized_name = _normalize(name)
-        page_url = index.get(normalized_name)
-        if not page_url:
-            contained = [url for indexed_name, url in index.items()
-                         if normalized_name in indexed_name.split() or indexed_name.endswith(normalized_name)]
-            if len(set(contained)) == 1:
-                page_url = contained[0]
-        db_request = client.get(page_url) if page_url else None
-        rinf_request = client.get(RINF_ENDPOINT, params={"query": query}, headers={"Accept": "application/sparql-results+json"})
-        if db_request:
-            db_response, rinf_response = await asyncio.gather(db_request, rinf_request)
-            db_response.raise_for_status()
-            db_platforms = parse_db_platform_table(db_response.text)
-        else:
-            rinf_response = await rinf_request
-            db_platforms = []
-        rinf_response.raise_for_status()
-    rinf_platforms = parse_rinf_lengths(rinf_response.json())
+        try:
+            index = await _equipment_index(client)
+            normalized_name = _normalize(name)
+            page_url = index.get(normalized_name)
+            if not page_url:
+                contained = [url for indexed_name, url in index.items()
+                             if normalized_name in indexed_name.split() or indexed_name.endswith(normalized_name)]
+                if len(set(contained)) == 1:
+                    page_url = contained[0]
+            if page_url:
+                db_response = await client.get(page_url)
+                db_response.raise_for_status()
+                db_platforms = parse_db_platform_table(db_response.text)
+        except httpx.HTTPError:
+            db_failed = True
+
+        try:
+            rinf_response = await client.get(RINF_ENDPOINT, params={"query": query}, headers={"Accept": "application/sparql-results+json"})
+            rinf_response.raise_for_status()
+            rinf_platforms = parse_rinf_lengths(rinf_response.json())
+        except httpx.HTTPError:
+            rinf_failed = True
+
+    if db_failed and rinf_failed:
+        raise httpx.HTTPError("DB InfraGO and ERA RINF are temporarily unavailable")
     by_track, used_rinf_ids = map_rinf_platforms(db_platforms, rinf_platforms, safe_ril)
     platforms = []
     for row in db_platforms:
@@ -154,5 +165,8 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
         "ril": safe_ril,
         "platforms": platforms,
         "sources": {"db_infrago": page_url, "era_rinf": RINF_ENDPOINT},
-        "status": {"db_infrago": "active" if db_platforms else "not_found", "era_rinf": "active" if rinf_platforms else "not_found"},
+        "status": {
+            "db_infrago": "unavailable" if db_failed else "active" if db_platforms else "not_found",
+            "era_rinf": "unavailable" if rinf_failed else "active" if rinf_platforms else "not_found",
+        },
     }

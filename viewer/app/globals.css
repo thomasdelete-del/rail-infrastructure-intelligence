@@ -204,6 +204,25 @@ button:focus-visible, a:focus-visible { outline: 3px solid #f5a623; outline-offs
 .source-state-active, .source-state-pending { border-radius: 999px; padding: 3px 8px; font-size: .75rem; font-weight: 700; white-space: nowrap; }
 .source-state-active { background: #e8f6ef; color: #176944; }
 .source-state-pending { background: #fff1df; color: #87420f; }
+.station-master-card { margin-top: 28px; }
+.station-master-scroll { overflow-x: auto; }
+.station-master-table { width: 100%; min-width: 820px; border-collapse: collapse; font-size: .875rem; }
+.station-master-table th { background: #f2f6f7; color: #566872; font-size: .75rem; letter-spacing: .04em; text-align: left; text-transform: uppercase; }
+.station-master-table th, .station-master-table td { border-right: 1px solid #dde5e8; border-bottom: 1px solid #dde5e8; padding: 12px 15px; vertical-align: top; }
+.station-master-table th:last-child, .station-master-table td:last-child { border-right: 0; }
+.station-master-table td:first-child { color: #18313f; white-space: nowrap; }
+.matching-workflow-heading { padding: 20px 22px 12px; border-top: 8px solid #f2f6f7; }
+.matching-workflow-heading h3 { margin: 0; font-size: 1rem; }
+.matching-workflow-heading p { margin: 5px 0 0; color: #687b86; font-size: .8125rem; }
+.matching-workflow-table { min-width: 1080px; }
+.matching-workflow-table ol { margin: 0 0 7px; padding-left: 18px; color: #526873; font-size: .78rem; line-height: 1.5; }
+.matching-workflow-table td:nth-child(2) span { color: #60717a; font-size: .78rem; line-height: 1.6; }
+.matching-workflow-table td:nth-child(4) { min-width: 230px; }
+.matching-workflow-table td:nth-child(4) small { display: block; margin-top: 5px; color: #687b86; font-size: .7rem; }
+.matching-status { display: inline-flex; border-radius: 999px; padding: 5px 9px; font-size: .75rem; font-weight: 750; white-space: nowrap; }
+.matching-status-confirmed { background: #e8f6ef; color: #176944; }
+.matching-status-derived { background: #e6f2f7; color: #0b5278; }
+.matching-status-open { background: #fff1df; color: #87420f; }
 .platform-data-scroll { overflow-x: auto; }
 .platform-data-table { min-width: 1510px; width: 100%; border-collapse: collapse; font-size: .875rem; }
 .platform-data-table th { background: #f2f6f7; color: #566872; font-size: .75rem; letter-spacing: .035em; text-align: left; text-transform: uppercase; }
