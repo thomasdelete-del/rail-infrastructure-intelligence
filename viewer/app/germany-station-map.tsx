@@ -979,6 +979,87 @@ export function SelectedStationMap({
           elements: OsmElement[];
           cache_used?: boolean;
         };
+        const isFriedbergPilot =
+          identity?.stationNumber === '1930' ||
+          /^Friedberg \(Hess\)/i.test(authoritativeName);
+        let friedbergPilotEdges: PlatformEdge[] = [];
+        if (isFriedbergPilot) {
+          const pilotResponse = await fetch(
+            `${API}/stations/friedberg-hess/infrastructure/openstation`,
+            { cache: 'no-store' },
+          );
+          if (pilotResponse.ok) {
+            const pilotInventory =
+              (await pilotResponse.json()) as StationInventory;
+            let pilotDrafts: Record<
+              string,
+              { latitude: number; longitude: number }
+            > = {};
+            try {
+              pilotDrafts = JSON.parse(
+                localStorage.getItem('friedberg-coordinate-drafts') ?? '{}',
+              ) as typeof pilotDrafts;
+            } catch {}
+            friedbergPilotEdges = pilotInventory.objects
+              .filter((object) => object.object_type === 'platform_edge')
+              .flatMap((object) => {
+                const observation = (attribute: string) =>
+                  object.observations
+                    .filter(
+                      (item) =>
+                        item.source_key === 'openstreetmap' &&
+                        item.attribute === attribute,
+                    )
+                    .at(-1)?.value;
+                const start = observation('start_coordinates') as
+                  | { latitude?: unknown; longitude?: unknown }
+                  | undefined;
+                const end = observation('end_coordinates') as
+                  | { latitude?: unknown; longitude?: unknown }
+                  | undefined;
+                const startDraft = pilotDrafts[`${object.object_key}:start`];
+                const endDraft = pilotDrafts[`${object.object_key}:end`];
+                const geometry = [
+                  startDraft ?? {
+                    latitude: Number(start?.latitude),
+                    longitude: Number(start?.longitude),
+                  },
+                  endDraft ?? {
+                    latitude: Number(end?.latitude),
+                    longitude: Number(end?.longitude),
+                  },
+                ];
+                if (
+                  geometry.some(
+                    (point) =>
+                      !Number.isFinite(point.latitude) ||
+                      !Number.isFinite(point.longitude),
+                  )
+                )
+                  return [];
+                const track = String(
+                  observation('public_code') ??
+                    observation('name') ??
+                    object.object_key.replace(/^FRI-PE-/i, ''),
+                ).replace(/^Gleis\s+/i, '');
+                const points = geometry.map((point) => ({
+                  lat: point.latitude,
+                  lon: point.longitude,
+                }));
+                return [
+                  {
+                    id: object.object_key,
+                    track,
+                    trackSource: 'ref' as const,
+                    osmType: 'way' as const,
+                    osmId: 0,
+                    geometry: points,
+                    length: geometryLength(points),
+                  },
+                ];
+              });
+          }
+        }
         if (disposed) return;
         if (data.elements.length)
           localStorage.setItem(
@@ -1104,13 +1185,16 @@ export function SelectedStationMap({
             height: tags.height,
           });
         });
-        const edges = [...explicitEdges];
+        const edges = friedbergPilotEdges.length
+          ? [...friedbergPilotEdges]
+          : [...explicitEdges];
         const explicitTracks = new Set(
           explicitEdges
             .map((edge) => edge.track)
             .filter((track) => track && track !== 'ohne Nummer'),
         );
         platformCandidates.forEach((candidate) => {
+          if (friedbergPilotEdges.length) return;
           if (
             (candidate.track && !explicitTracks.has(candidate.track)) ||
             (!candidate.track && !explicitEdges.length)
