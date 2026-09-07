@@ -2135,94 +2135,111 @@ export function SelectedStationMap({
             ) : (
               <span aria-hidden="true" />
             )}
-            {aerialChecksRunning
-              ? `Luftbildprüfung läuft (${Object.keys(aerialResults).length}/${Math.max(platformEdges.length, authoritativePlatforms.length)})`
-              : reviewKey
-                ? `Nächsten offenen Endpunkt prüfen (${reviewedEndpointCount}/${reviewEndpoints.length})`
-                : 'Bahnsteigkanten prüfen'}
+            <span className="platform-check-switch-label">
+              Bahnsteigkanten prüfen
+              <small>
+                {aerialChecksRunning
+                  ? `Luftbildprüfung läuft (${Object.keys(aerialResults).length}/${Math.max(platformEdges.length, authoritativePlatforms.length)})`
+                  : `${reviewedEndpointCount}/${reviewEndpoints.length} Endpunkte bearbeitet`}
+              </small>
+            </span>
           </button>
         </div>
       </div>
       {reviewKey || Object.keys(aerialResults).length ? (
-        <div
-          className="platform-check-results"
-          aria-label="Ergebnisse der Bahnsteigkantenprüfung"
-        >
-          {platformEdges.map((edge) => {
-            const result = aerialResults[edge.id];
-            const endpointResult = (endpoint: 'start' | 'end') => {
-              const review = endpointReviews[`${edge.id}:${endpoint}`];
-              const shift =
-                endpoint === 'start'
-                  ? result?.start_shift_m
-                  : result?.end_shift_m;
-              const probability =
-                endpoint === 'start'
-                  ? result?.start_learned_probability
-                  : result?.end_learned_probability;
-              const text =
-                review === 'correct'
-                  ? 'OSM bestätigt'
-                  : review === 'corrected'
-                    ? 'Richtiger Abschluss gesetzt'
-                    : review === 'none'
-                      ? 'Kein Abschluss – Korrektur offen'
-                      : shift != null
-                        ? `${shift >= 0 ? '+' : ''}${shift.toFixed(1)} m`
-                        : aerialChecksRunning
-                          ? 'Wird geprüft …'
-                          : (result?.reason ?? 'Noch nicht geprüft');
+        <>
+          <p className="aerial-confidence-explanation">
+            <strong>Erkennungssicherheit:</strong> Der Prozentwert beschreibt,
+            wie sicher die Luftbildanalyse den jeweiligen Abschluss erkennt. 100
+            % bedeutet höchste Modellsicherheit; der Wert ist keine
+            Längenabweichung und ersetzt nicht die fachliche Bestätigung.
+          </p>
+          <div
+            className="platform-check-results"
+            aria-label="Ergebnisse der Bahnsteigkantenprüfung"
+          >
+            {platformEdges.map((edge) => {
+              const result = aerialResults[edge.id];
+              const endpointResult = (endpoint: 'start' | 'end') => {
+                const review = endpointReviews[`${edge.id}:${endpoint}`];
+                const shift =
+                  endpoint === 'start'
+                    ? result?.start_shift_m
+                    : result?.end_shift_m;
+                const probability =
+                  endpoint === 'start'
+                    ? result?.start_learned_probability
+                    : result?.end_learned_probability;
+                const confidence = result
+                  ? Math.round((probability ?? result.confidence) * 100)
+                  : null;
+                const text =
+                  review === 'correct'
+                    ? 'OSM bestätigt'
+                    : review === 'corrected'
+                      ? 'Richtiger Abschluss gesetzt'
+                      : review === 'none'
+                        ? 'Kein Abschluss – Korrektur offen'
+                        : shift != null
+                          ? `${shift >= 0 ? '+' : ''}${shift.toFixed(1)} m`
+                          : aerialChecksRunning
+                            ? 'Wird geprüft …'
+                            : (result?.reason ?? 'Noch nicht geprüft');
+                return (
+                  <button
+                    type="button"
+                    className="endpoint-result-jump"
+                    onClick={() => focusEndpoint(edge, endpoint)}
+                  >
+                    <span>
+                      <b>{endpoint === 'start' ? 'Anfang' : 'Ende'}</b>
+                      <small>Im Luftbild prüfen</small>
+                    </span>
+                    <strong>{text}</strong>
+                    {confidence != null ? (
+                      <small className="result-confidence">
+                        Erkennungssicherheit: {confidence} %
+                        {probability != null
+                          ? ' · Lernmodell'
+                          : ' · Bildanalyse'}
+                      </small>
+                    ) : null}
+                  </button>
+                );
+              };
+              const level =
+                result?.status === 'plausible'
+                  ? 'plausible'
+                  : result?.status === 'check'
+                    ? 'check'
+                    : result
+                      ? 'high'
+                      : 'check';
               return (
-                <button
-                  type="button"
-                  className="endpoint-result-jump"
-                  onClick={() => focusEndpoint(edge, endpoint)}
+                <article
+                  key={edge.id}
+                  className={`platform-check-result platform-check-result-${level}`}
                 >
-                  <span>
-                    <b>{endpoint === 'start' ? 'Anfang' : 'Ende'}</b>
-                    <small>Im Luftbild prüfen</small>
-                  </span>
-                  <strong>
-                    {text}
-                    {result
-                      ? ` · ${Math.round((probability ?? result.confidence) * 100)}%`
-                      : ''}
-                  </strong>
-                </button>
+                  <button
+                    type="button"
+                    className="platform-result-track"
+                    onClick={() => focusEndpoint(edge, 'start')}
+                  >
+                    Gleis {edge.track}
+                  </button>
+                  {endpointResult('start')}
+                  {endpointResult('end')}
+                  {result ? (
+                    <small className="result-learning-status">
+                      Lernmodus aktiv · {result.training_sample_count ?? 0}{' '}
+                      Bewertungen
+                    </small>
+                  ) : null}
+                </article>
               );
-            };
-            const level =
-              result?.status === 'plausible'
-                ? 'plausible'
-                : result?.status === 'check'
-                  ? 'check'
-                  : result
-                    ? 'high'
-                    : 'check';
-            return (
-              <article
-                key={edge.id}
-                className={`platform-check-result platform-check-result-${level}`}
-              >
-                <button
-                  type="button"
-                  className="platform-result-track"
-                  onClick={() => focusEndpoint(edge, 'start')}
-                >
-                  Gleis {edge.track}
-                </button>
-                {endpointResult('start')}
-                {endpointResult('end')}
-                {result ? (
-                  <small className="result-learning-status">
-                    Lernmodus aktiv · {result.training_sample_count ?? 0}{' '}
-                    Bewertungen
-                  </small>
-                ) : null}
-              </article>
-            );
-          })}
-        </div>
+            })}
+          </div>
+        </>
       ) : null}
       <div className="generic-platform-scroll">
         <table className="platform-data-table">
