@@ -185,9 +185,21 @@ async def osm_change_report(persist: bool = False):
     return await build_change_report(OpenStreetMapCollector(), FRIEDBERG["name"], persist=persist)
 
 @app.get("/stations/friedberg-hess/aerial-analysis/osm")
-async def osm_aerial_analysis(track: str = Query(min_length=1, max_length=4, pattern=r"^\d+[a-zA-Z]?$")):
+async def osm_aerial_analysis(
+    track: str = Query(min_length=1, max_length=4, pattern=r"^\d+[a-zA-Z]?$"),
+    start_latitude: float | None = Query(default=None, ge=47, le=56),
+    start_longitude: float | None = Query(default=None, ge=5, le=16),
+    end_latitude: float | None = Query(default=None, ge=47, le=56),
+    end_longitude: float | None = Query(default=None, ge=5, le=16),
+):
     try:
-        return await analyse_osm_platform(track)
+        return await analyse_osm_platform(
+            track,
+            start_latitude=start_latitude,
+            start_longitude=start_longitude,
+            end_latitude=end_latitude,
+            end_longitude=end_longitude,
+        )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -197,9 +209,27 @@ async def osm_aerial_analysis(track: str = Query(min_length=1, max_length=4, pat
 
 
 @app.get("/stations/aerial-analysis/osm")
-async def station_aerial_analysis(name: str = Query(min_length=2, max_length=160), track: str = Query(min_length=1, max_length=20), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
+async def station_aerial_analysis(
+    name: str = Query(min_length=2, max_length=160),
+    track: str = Query(min_length=1, max_length=20),
+    latitude: float = Query(ge=47, le=56),
+    longitude: float = Query(ge=5, le=16),
+    start_latitude: float | None = Query(default=None, ge=47, le=56),
+    start_longitude: float | None = Query(default=None, ge=5, le=16),
+    end_latitude: float | None = Query(default=None, ge=47, le=56),
+    end_longitude: float | None = Query(default=None, ge=5, le=16),
+):
     try:
-        return await analyse_osm_platform(track, name, latitude, longitude)
+        return await analyse_osm_platform(
+            track,
+            name,
+            latitude,
+            longitude,
+            start_latitude,
+            start_longitude,
+            end_latitude,
+            end_longitude,
+        )
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:

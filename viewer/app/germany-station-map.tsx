@@ -176,6 +176,24 @@ const lateralDistanceToGeometry = (
   }, Number.POSITIVE_INFINITY);
 };
 
+const belongsToPlatformSide = (
+  point: { lat: number; lon: number },
+  target: PlatformEdge,
+  edges: PlatformEdge[],
+) => {
+  const targetDistance = lateralDistanceToGeometry(point, target.geometry);
+  if (targetDistance > 12) return false;
+  const nearestOtherDistance = Math.min(
+    ...edges
+      .filter((edge) => edge.id !== target.id)
+      .map((edge) => lateralDistanceToGeometry(point, edge.geometry)),
+  );
+  return (
+    !Number.isFinite(nearestOtherDistance) ||
+    targetDistance + 0.75 < nearestOtherDistance
+  );
+};
+
 const platformAxis = (geometry: Array<{ lat: number; lon: number }>) => {
   let best:
     | [{ lat: number; lon: number }, { lat: number; lon: number }, number]
@@ -251,7 +269,13 @@ export function SelectedStationMap({
     'loading' | 'active' | 'unavailable'
   >('loading');
   const [sourceUpdated, setSourceUpdated] = useState<Record<string, Date>>({});
-  const [databaseFreshness, setDatabaseFreshness] = useState<{ lastUpdate?: string; sources: Record<string, { sourceDate?: string; retrievalDate?: string; databaseUpdate?: string }> }>({ sources: {} });
+  const [databaseFreshness, setDatabaseFreshness] = useState<{
+    lastUpdate?: string;
+    sources: Record<
+      string,
+      { sourceDate?: string; retrievalDate?: string; databaseUpdate?: string }
+    >;
+  }>({ sources: {} });
   const [reviewKey, setReviewKey] = useState<string | null>(null);
   const [endpointReviews, setEndpointReviews] = useState<
     Record<string, 'correct' | 'none' | 'corrected'>
@@ -310,11 +334,36 @@ export function SelectedStationMap({
   }, [station.id]);
   useEffect(() => {
     const controller = new AbortController();
-    void fetch(`${API}/sources/freshness`, { cache: 'no-store', signal: controller.signal })
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error()))
+    void fetch(`${API}/sources/freshness`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then((response) =>
+        response.ok ? response.json() : Promise.reject(new Error()),
+      )
       .then((raw: unknown) => {
-        const data = raw as { last_database_update?: string | null; sources?: Array<{ source_key: string; source_date?: string | null; retrieval_date?: string | null; last_database_update?: string | null }> };
-        setDatabaseFreshness({ lastUpdate: data.last_database_update ?? undefined, sources: Object.fromEntries((data.sources ?? []).map((source) => [source.source_key, { sourceDate: source.source_date ?? undefined, retrievalDate: source.retrieval_date ?? undefined, databaseUpdate: source.last_database_update ?? undefined }])) });
+        const data = raw as {
+          last_database_update?: string | null;
+          sources?: Array<{
+            source_key: string;
+            source_date?: string | null;
+            retrieval_date?: string | null;
+            last_database_update?: string | null;
+          }>;
+        };
+        setDatabaseFreshness({
+          lastUpdate: data.last_database_update ?? undefined,
+          sources: Object.fromEntries(
+            (data.sources ?? []).map((source) => [
+              source.source_key,
+              {
+                sourceDate: source.source_date ?? undefined,
+                retrievalDate: source.retrieval_date ?? undefined,
+                databaseUpdate: source.last_database_update ?? undefined,
+              },
+            ]),
+          ),
+        });
       })
       .catch(() => setDatabaseFreshness({ sources: {} }));
     return () => controller.abort();
@@ -362,28 +411,42 @@ export function SelectedStationMap({
     );
   };
   useEffect(() => {
-    if (!correctionTarget || !mapRef.current) return;
+    if (!mapRef.current) return;
     const map = mapRef.current;
-    const handleClick = (event: { latlng: { lat: number; lng: number } }) => {
+    const reviewedTarget = reviewKey
+      ? platformEdges.flatMap((edge) =>
+          (['start', 'end'] as const)
+            .filter((endpoint) => `${edge.id}:${endpoint}` === reviewKey)
+            .map((endpoint) => ({
+              edgeId: edge.id,
+              endpoint,
+              track: edge.track,
+            })),
+        )[0]
+      : undefined;
+    const applyCoordinate = (
+      event: { latlng: { lat: number; lng: number } },
+      target: { edgeId: string; endpoint: 'start' | 'end'; track: string },
+    ) => {
       const coordinate = { lat: event.latlng.lat, lon: event.latlng.lng };
       const targetEdge = platformEdges.find(
-        (edge) => edge.id === correctionTarget.edgeId,
+        (edge) => edge.id === target.edgeId,
       );
       if (
         !targetEdge ||
-        lateralDistanceToGeometry(coordinate, targetEdge.geometry) > 12
+        !belongsToPlatformSide(coordinate, targetEdge, platformEdges)
       ) {
         setCorrectionError(
-          `Punkt liegt nicht am Korridor von Gleis ${correctionTarget.track}.`,
+          `Punkt liegt nicht eindeutig auf der Bahnsteigkante von Gleis ${target.track}.`,
         );
         return;
       }
       setCorrectionError(null);
       setPlatformEdges((current) =>
         current.map((edge) => {
-          if (edge.id !== correctionTarget.edgeId) return edge;
+          if (edge.id !== target.edgeId) return edge;
           const geometry = [...edge.geometry];
-          if (correctionTarget.endpoint === 'start') geometry[0] = coordinate;
+          if (target.endpoint === 'start') geometry[0] = coordinate;
           else geometry[geometry.length - 1] = coordinate;
           setCorrectedGeometries((drafts) => ({
             ...drafts,
@@ -392,11 +455,11 @@ export function SelectedStationMap({
           return { ...edge, geometry, length: geometryLength(geometry) };
         }),
       );
-      const key = `${correctionTarget.edgeId}:${correctionTarget.endpoint}`;
+      const key = `${target.edgeId}:${target.endpoint}`;
       setEndpointReviews((current) => ({ ...current, [key]: 'corrected' }));
-      const analysis = aerialResults[correctionTarget.edgeId];
+      const analysis = aerialResults[target.edgeId];
       const features =
-        correctionTarget.endpoint === 'start'
+        target.endpoint === 'start'
           ? analysis?.start_features
           : analysis?.end_features;
       setLearningMessage('Korrektur wird als Lernbeispiel gespeichert …');
@@ -404,8 +467,8 @@ export function SelectedStationMap({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          track: `${authoritativeName}:${correctionTarget.track}`,
-          endpoint: correctionTarget.endpoint,
+          track: `${authoritativeName}:${target.track}`,
+          endpoint: target.endpoint,
           accepted: false,
           features: features ?? {},
           corrected_coordinate: {
@@ -427,11 +490,31 @@ export function SelectedStationMap({
         );
       setCorrectionTarget(null);
     };
+    const handleClick = (event: { latlng: { lat: number; lng: number } }) => {
+      if (correctionTarget) applyCoordinate(event, correctionTarget);
+    };
+    const handleDoubleClick = (event: {
+      latlng: { lat: number; lng: number };
+      originalEvent?: MouseEvent;
+    }) => {
+      const target = correctionTarget ?? reviewedTarget;
+      if (!target) return;
+      event.originalEvent?.preventDefault();
+      applyCoordinate(event, target);
+    };
     map.on('click', handleClick);
+    map.on('dblclick', handleDoubleClick);
     return () => {
       map.off('click', handleClick);
+      map.off('dblclick', handleDoubleClick);
     };
-  }, [aerialResults, authoritativeName, correctionTarget, platformEdges]);
+  }, [
+    aerialResults,
+    authoritativeName,
+    correctionTarget,
+    platformEdges,
+    reviewKey,
+  ]);
   useEffect(() => {
     setIdentity(null);
     setDbSources({});
@@ -625,10 +708,11 @@ export function SelectedStationMap({
     let instance: LeafletMap | null = null;
     void import('leaflet').then(async (L) => {
       if (disposed || !el.current) return;
-      instance = L.map(el.current, { minZoom: 5, maxZoom: 24 }).setView(
-        [station.latitude, station.longitude],
-        17,
-      );
+      instance = L.map(el.current, {
+        minZoom: 5,
+        maxZoom: 24,
+        doubleClickZoom: false,
+      }).setView([station.latitude, station.longitude], 17);
       const osmBaseLayer = L.tileLayer(
         'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
         {
@@ -1052,23 +1136,16 @@ export function SelectedStationMap({
           const baseColor = endpoint === 'start' ? '#20a464' : '#d54532';
           const label = endpoint === 'start' ? 'Anfang' : 'Ende';
           if (status === 'corrected') {
-            L.circleMarker([point.lat, point.lon], {
-              radius: 11,
-              color: '#063b55',
-              weight: 3,
-              fillColor: '#00c7df',
-              fillOpacity: 1,
+            L.marker([point.lat, point.lon], {
+              icon: L.divIcon({
+                className: 'corrected-endpoint-icon',
+                html: '<span aria-hidden="true"></span>',
+                iconSize: [22, 22],
+                iconAnchor: [11, 11],
+              }),
             })
               .bindTooltip(`${label}: richtiger Abschluss gesetzt`)
               .addTo(target);
-            L.circleMarker([point.lat, point.lon], {
-              radius: 3,
-              color: '#fff',
-              weight: 2,
-              fillColor: '#fff',
-              fillOpacity: 1,
-              interactive: false,
-            }).addTo(target);
           } else if (status === 'correct') {
             L.circleMarker([point.lat, point.lon], {
               radius: 9,
@@ -1195,6 +1272,9 @@ export function SelectedStationMap({
     void Promise.all(
       tracks.map(async (track) => {
         try {
+          const existingEdge = platformEdges.find(
+            (edge) => edge.track === track,
+          );
           const isFriedbergPilot =
             identity?.stationNumber === '1930' ||
             /^Friedberg \(Hess\)/i.test(authoritativeName);
@@ -1206,6 +1286,14 @@ export function SelectedStationMap({
                 latitude: String(station.latitude),
                 longitude: String(station.longitude),
               });
+          const currentStart = existingEdge?.geometry[0];
+          const currentEnd = existingEdge?.geometry.at(-1);
+          if (currentStart && currentEnd) {
+            parameters.set('start_latitude', String(currentStart.lat));
+            parameters.set('start_longitude', String(currentStart.lon));
+            parameters.set('end_latitude', String(currentEnd.lat));
+            parameters.set('end_longitude', String(currentEnd.lon));
+          }
           const endpoint = isFriedbergPilot
             ? `${API}/stations/friedberg-hess/aerial-analysis/osm`
             : `${API}/stations/aerial-analysis/osm`;
@@ -1214,9 +1302,33 @@ export function SelectedStationMap({
           });
           if (!response.ok) throw new Error();
           const result = (await response.json()) as GenericAerialAnalysis;
-          const existingEdge = platformEdges.find(
-            (edge) => edge.track === track,
-          );
+          if (
+            existingEdge &&
+            result.candidate_start &&
+            result.candidate_end &&
+            (!belongsToPlatformSide(
+              {
+                lat: result.candidate_start.latitude,
+                lon: result.candidate_start.longitude,
+              },
+              existingEdge,
+              platformEdges,
+            ) ||
+              !belongsToPlatformSide(
+                {
+                  lat: result.candidate_end.latitude,
+                  lon: result.candidate_end.longitude,
+                },
+                existingEdge,
+                platformEdges,
+              ))
+          ) {
+            result.status = 'check';
+            result.reason =
+              'Erkannter Abschluss liegt nicht eindeutig auf derselben Bahnsteigkante';
+            delete result.candidate_start;
+            delete result.candidate_end;
+          }
           const fallbackEdge =
             !existingEdge && result.candidate_start && result.candidate_end
               ? {
@@ -1492,13 +1604,23 @@ export function SelectedStationMap({
           : state === 'not_found'
             ? 'Quelle erreichbar, kein passender Datensatz'
             : 'Kein erfolgreicher Abruf in dieser Sitzung';
-  const formatSourceDate = (value?: string) => value ? new Date(value).toLocaleString('de-DE', { dateStyle: 'short', timeStyle: value.includes('T') ? 'short' : undefined }) : null;
+  const formatSourceDate = (value?: string) =>
+    value
+      ? new Date(value).toLocaleString('de-DE', {
+          dateStyle: 'short',
+          timeStyle: value.includes('T') ? 'short' : undefined,
+        })
+      : null;
   const sourceDataDate = (source: { key: string; databaseKey: string }) => {
-    if (source.key === 'satellite') return 'Bildaufnahmedatum: standortabhängig; vom Kartendienst nicht ausgewiesen';
-    if (source.key === 'official') return 'Orthofoto-Aufnahmedatum: im WMS-Layer nicht ausgewiesen';
+    if (source.key === 'satellite')
+      return 'Bildaufnahmedatum: standortabhängig; vom Kartendienst nicht ausgewiesen';
+    if (source.key === 'official')
+      return 'Orthofoto-Aufnahmedatum: im WMS-Layer nicht ausgewiesen';
     const stored = databaseFreshness.sources[source.databaseKey];
     const date = formatSourceDate(stored?.sourceDate ?? stored?.databaseUpdate);
-    return date ? `Datenstand: ${date}` : 'Datenstand: von der Quelle nicht ausgewiesen';
+    return date
+      ? `Datenstand: ${date}`
+      : 'Datenstand: von der Quelle nicht ausgewiesen';
   };
   const inventoryObjects = inventory?.objects ?? [];
   const inventoryCounts = Object.fromEntries(
@@ -1927,7 +2049,11 @@ export function SelectedStationMap({
             <p>
               Aktive Verbindungen und Qualitätsklasse für {authoritativeName}
             </p>
-            <p className="database-update-date">Letzte Aktualisierung der Infrastrukturdatenbank: {formatSourceDate(databaseFreshness.lastUpdate) ?? 'noch nicht ausgewiesen'}</p>
+            <p className="database-update-date">
+              Letzte Aktualisierung der Infrastrukturdatenbank:{' '}
+              {formatSourceDate(databaseFreshness.lastUpdate) ??
+                'noch nicht ausgewiesen'}
+            </p>
           </div>
           <strong>
             {sourceEntries.filter((source) => source.state === 'active').length}{' '}
@@ -1946,7 +2072,8 @@ export function SelectedStationMap({
                   Qualitätsklasse {source.quality}
                 </p>
                 <p className="source-freshness">
-                  {sourceDataDate(source)}<br />
+                  {sourceDataDate(source)}
+                  <br />
                   {sourceFreshness(source.key, source.state)}
                 </p>
               </div>
@@ -1965,73 +2092,6 @@ export function SelectedStationMap({
               </span>
             </div>
           ))}
-        </div>
-      </section>
-      <section className="generic-feature-card">
-        <div className="generic-feature-heading">
-          <div>
-            <h2>Bahnsteigübersicht</h2>
-            <p>DB-Gleisnummern mit zugeordneten RINF-Infrastrukturkennungen</p>
-          </div>
-          <span className="status-ok">
-            <ShieldCheck size={15} />
-            Identität geprüft
-          </span>
-        </div>
-        <div className="generic-platform-overview">
-          {platformRows.map(({ track, edge, data }, index) => {
-            const check = lengthComparison(edge, data);
-            return (
-              <div className="generic-platform-row" key={`overview-${track}`}>
-                <strong>B{index + 1}</strong>
-                <div>
-                  <span>Bahnsteig Gleis {track}</span>
-                  <div>
-                    {edge ? (
-                      <button
-                        type="button"
-                        className="track-pill track-pill-button"
-                        onClick={() => focusPlatformLength(edge)}
-                        title={`Gleis ${track} im Luftbild anzeigen`}
-                      >
-                        Gleis {track}
-                      </button>
-                    ) : (
-                      <span className="track-pill">Gleis {track}</span>
-                    )}
-                    {data?.rinf_platform_id ? (
-                      <small>
-                        RINF {data.rinf_platform_id}
-                        {data.rinf_platform_id !== track
-                          ? ` → Gleis ${track}`
-                          : ''}
-                      </small>
-                    ) : (
-                      <small>RINF nicht zugeordnet</small>
-                    )}
-                    {check ? (
-                      <small>
-                        {Math.abs(check.delta).toFixed(1)} m Abweichung ·{' '}
-                        {check.level === 'low'
-                          ? 'gering'
-                          : check.level === 'check'
-                            ? 'prüfen'
-                            : 'auffällig'}
-                      </small>
-                    ) : null}
-                  </div>
-                </div>
-                <i
-                  className={
-                    check
-                      ? `platform-overview-${check.level}`
-                      : 'platform-overview-missing'
-                  }
-                  aria-hidden="true"
-                />
-              </div>
-            );
-          })}
         </div>
       </section>
       <div className="platform-check-panel generic-platform-check">
@@ -2292,7 +2352,9 @@ export function SelectedStationMap({
                           <div className="updated-length">
                             <span className="updated-badge">Aktualisiert</span>
                             <strong>{edge.length.toFixed(1)} m</strong>
-                            <span>Neue OSM-Länge · Grundlage der Abweichung</span>
+                            <span>
+                              Neue OSM-Länge · Grundlage der Abweichung
+                            </span>
                           </div>
                         ) : (
                           <>
@@ -2301,7 +2363,10 @@ export function SelectedStationMap({
                           </>
                         )}
                         {corrected && originalGeometry ? (
-                          <span>OSM bisher: {geometryLength(originalGeometry).toFixed(1)} m</span>
+                          <span>
+                            OSM bisher:{' '}
+                            {geometryLength(originalGeometry).toFixed(1)} m
+                          </span>
                         ) : null}
                         <div
                           className={`osm-plausibility osm-plausibility-${plausibility.level}`}
@@ -2499,6 +2564,73 @@ export function SelectedStationMap({
           ) : (
             <p>Keine Ausstattungstypen geliefert.</p>
           )}
+        </div>
+      </section>
+      <section className="generic-feature-card">
+        <div className="generic-feature-heading">
+          <div>
+            <h2>Bahnsteigübersicht</h2>
+            <p>DB-Gleisnummern mit zugeordneten RINF-Infrastrukturkennungen</p>
+          </div>
+          <span className="status-ok">
+            <ShieldCheck size={15} />
+            Identität geprüft
+          </span>
+        </div>
+        <div className="generic-platform-overview">
+          {platformRows.map(({ track, edge, data }, index) => {
+            const check = lengthComparison(edge, data);
+            return (
+              <div className="generic-platform-row" key={`overview-${track}`}>
+                <strong>B{index + 1}</strong>
+                <div>
+                  <span>Bahnsteig Gleis {track}</span>
+                  <div>
+                    {edge ? (
+                      <button
+                        type="button"
+                        className="track-pill track-pill-button"
+                        onClick={() => focusPlatformLength(edge)}
+                        title={`Gleis ${track} im Luftbild anzeigen`}
+                      >
+                        Gleis {track}
+                      </button>
+                    ) : (
+                      <span className="track-pill">Gleis {track}</span>
+                    )}
+                    {data?.rinf_platform_id ? (
+                      <small>
+                        RINF {data.rinf_platform_id}
+                        {data.rinf_platform_id !== track
+                          ? ` → Gleis ${track}`
+                          : ''}
+                      </small>
+                    ) : (
+                      <small>RINF nicht zugeordnet</small>
+                    )}
+                    {check ? (
+                      <small>
+                        {Math.abs(check.delta).toFixed(1)} m Abweichung ·{' '}
+                        {check.level === 'low'
+                          ? 'gering'
+                          : check.level === 'check'
+                            ? 'prüfen'
+                            : 'auffällig'}
+                      </small>
+                    ) : null}
+                  </div>
+                </div>
+                <i
+                  className={
+                    check
+                      ? `platform-overview-${check.level}`
+                      : 'platform-overview-missing'
+                  }
+                  aria-hidden="true"
+                />
+              </div>
+            );
+          })}
         </div>
       </section>
       <section className="generic-feature-card station-master-card">

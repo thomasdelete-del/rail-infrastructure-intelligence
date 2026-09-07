@@ -236,7 +236,16 @@ def analyse_platform_crop(
     }
 
 
-async def analyse_osm_platform(track: str, station_name: str = "Friedberg (Hess)", latitude: float | None = None, longitude: float | None = None) -> dict[str, Any]:
+async def analyse_osm_platform(
+    track: str,
+    station_name: str = "Friedberg (Hess)",
+    latitude: float | None = None,
+    longitude: float | None = None,
+    start_latitude: float | None = None,
+    start_longitude: float | None = None,
+    end_latitude: float | None = None,
+    end_longitude: float | None = None,
+) -> dict[str, Any]:
     global _OSM_CACHE
     generic_station = latitude is not None and longitude is not None
     if generic_station:
@@ -259,6 +268,12 @@ async def analyse_osm_platform(track: str, station_name: str = "Friedberg (Hess)
     if element.get("tags", {}).get("railway") == "platform" and len(geometry) > 2:
         geometry = max(((start, end) for index, start in enumerate(geometry) for end in geometry[index + 1:]), key=lambda pair: np.linalg.norm(np.array(_mercator(pair[0]["lat"], pair[0]["lon"])) - np.array(_mercator(pair[1]["lat"], pair[1]["lon"]))))
         geometry = list(geometry)
+    else:
+        geometry = [dict(point) for point in geometry]
+    if start_latitude is not None and start_longitude is not None:
+        geometry[0] = {"lat": start_latitude, "lon": start_longitude}
+    if end_latitude is not None and end_longitude is not None:
+        geometry[-1] = {"lat": end_latitude, "lon": end_longitude}
     paired_tracks = {"1": "1a", "1a": "1", "2": "4", "4": "2", "5": "7", "7": "5",
                      "8": "10", "10": "8", "11": "12", "12": "11"}
     paired_track = paired_tracks.get(track.casefold()) if not generic_station else None
