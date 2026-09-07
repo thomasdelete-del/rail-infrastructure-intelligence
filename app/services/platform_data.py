@@ -15,6 +15,7 @@ from app.collectors.rinf import RINF_ENDPOINT
 DB_EQUIPMENT_INDEX = "https://www.dbinfrago.com/web/bahnhoefe/leistungen/stationsnutzung/stationshalt/stationsausstattung"
 _INDEX_CACHE: tuple[float, dict[str, str]] | None = None
 _INDEX_LOCK = asyncio.Lock()
+_PLATFORM_SOURCE_CACHE: dict[str, dict[str, Any]] = {}
 # Station-scoped crosswalks verified against DB operational documentation/user review.
 # RINF platform IDs are not public passenger track numbers.
 RINF_PLATFORM_CROSSWALKS: dict[str, dict[str, str]] = {
@@ -126,6 +127,8 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
     rinf_platforms: list[dict[str, Any]] = []
     db_failed = False
     rinf_failed = False
+    db_cached = False
+    rinf_cached = False
     async with httpx.AsyncClient(timeout=90, follow_redirects=True, headers={"User-Agent": "rail-infrastructure-intelligence/1.4"}) as client:
         try:
             index = await _equipment_index(client)
@@ -140,6 +143,8 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
                 db_response = await client.get(page_url)
                 db_response.raise_for_status()
                 db_platforms = parse_db_platform_table(db_response.text)
+                if db_platforms:
+                    _PLATFORM_SOURCE_CACHE.setdefault(safe_ril, {})["db"] = db_platforms
         except httpx.HTTPError:
             db_failed = True
 
@@ -147,8 +152,18 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
             rinf_response = await client.get(RINF_ENDPOINT, params={"query": query}, headers={"Accept": "application/sparql-results+json"})
             rinf_response.raise_for_status()
             rinf_platforms = parse_rinf_lengths(rinf_response.json())
+            if rinf_platforms:
+                _PLATFORM_SOURCE_CACHE.setdefault(safe_ril, {})["rinf"] = rinf_platforms
         except httpx.HTTPError:
             rinf_failed = True
+
+    cached = _PLATFORM_SOURCE_CACHE.get(safe_ril, {})
+    if db_failed and cached.get("db"):
+        db_platforms = cached["db"]
+        db_cached = True
+    if rinf_failed and cached.get("rinf"):
+        rinf_platforms = cached["rinf"]
+        rinf_cached = True
 
     if db_failed and rinf_failed:
         raise httpx.HTTPError("DB InfraGO and ERA RINF are temporarily unavailable")
@@ -166,7 +181,7 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?platform ?platformId ?length WHERE {{
         "platforms": platforms,
         "sources": {"db_infrago": page_url, "era_rinf": RINF_ENDPOINT},
         "status": {
-            "db_infrago": "unavailable" if db_failed else "active" if db_platforms else "not_found",
-            "era_rinf": "unavailable" if rinf_failed else "active" if rinf_platforms else "not_found",
+            "db_infrago": "cached" if db_cached else "unavailable" if db_failed else "active" if db_platforms else "not_found",
+            "era_rinf": "cached" if rinf_cached else "unavailable" if rinf_failed else "active" if rinf_platforms else "not_found",
         },
     }

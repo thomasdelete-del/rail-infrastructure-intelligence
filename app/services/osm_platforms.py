@@ -6,7 +6,10 @@ import httpx
 OVERPASS_ENDPOINTS = (
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.nchc.org.tw/api/interpreter",
 )
+_OSM_PLATFORM_CACHE: dict[tuple[float, float], dict[str, Any]] = {}
 
 
 def platform_query(latitude: float, longitude: float, radius: int = 900) -> str:
@@ -38,6 +41,7 @@ def filter_rail_objects(elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 async def load_osm_platforms(latitude: float, longitude: float) -> dict[str, Any]:
     errors: list[str] = []
+    cache_key = (round(latitude, 3), round(longitude, 3))
     async with httpx.AsyncClient(timeout=35, follow_redirects=True) as client:
         for endpoint in OVERPASS_ENDPOINTS:
             try:
@@ -49,8 +53,13 @@ async def load_osm_platforms(latitude: float, longitude: float) -> dict[str, Any
                 response.raise_for_status()
                 elements = filter_rail_objects(response.json().get("elements", []))
                 if elements:
-                    return {"source": endpoint, "fallback_used": endpoint != OVERPASS_ENDPOINTS[0], "elements": elements}
+                    result = {"source": endpoint, "fallback_used": endpoint != OVERPASS_ENDPOINTS[0], "cache_used": False, "elements": elements}
+                    _OSM_PLATFORM_CACHE[cache_key] = result
+                    return result
                 errors.append(f"{endpoint}:empty")
             except (httpx.HTTPError, ValueError) as error:
                 errors.append(f"{endpoint}:{type(error).__name__}")
-    return {"source": None, "fallback_used": True, "elements": [], "errors": errors}
+    cached = _OSM_PLATFORM_CACHE.get(cache_key)
+    if cached:
+        return {**cached, "source": "last-successful-overpass-response", "fallback_used": True, "cache_used": True, "errors": errors}
+    return {"source": None, "fallback_used": True, "cache_used": False, "elements": [], "errors": errors}
