@@ -14,6 +14,7 @@ def platform_query(latitude: float, longitude: float, radius: int = 900) -> str:
         f'[out:json][timeout:25];('
         f'nwr(around:{radius},{latitude},{longitude})[railway=platform];'
         f'nwr(around:{radius},{latitude},{longitude})[railway=platform_edge];'
+        f'nwr(around:{radius},{latitude},{longitude})[public_transport=platform][train=yes];'
         f'nwr(around:{radius},{latitude},{longitude})[railway=subway_entrance];'
         f'nwr(around:{radius},{latitude},{longitude})[entrance][railway];'
         f'nwr(around:{radius},{latitude},{longitude})[highway=elevator];'
@@ -27,6 +28,8 @@ def filter_rail_objects(elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for element in elements:
         tags = element.get("tags") or {}
         if tags.get("railway") in {"platform", "platform_edge", "subway_entrance"} or (
+            tags.get("public_transport") == "platform" and tags.get("train") == "yes"
+        ) or (
             tags.get("entrance") and tags.get("railway")
         ) or tags.get("highway") == "elevator":
             result.append(element)

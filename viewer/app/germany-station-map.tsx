@@ -310,7 +310,7 @@ export function SelectedStationMap({
           } else if (item.geometry?.length && isPlatform) {
             L.polyline(item.geometry.map((p) => [p.lat, p.lon] as [number, number]), { color: '#0b5278', weight: 3, opacity: .55 }).addTo(instance!);
             const axis = platformAxis(item.geometry);
-            if (axis && axis[2] >= 40 && tags.railway === 'platform') platformCandidates.push({
+            if (axis && axis[2] >= 40 && (tags.railway === 'platform' || tags.public_transport === 'platform')) platformCandidates.push({
               id: `${item.type}-${item.id}`, track: tags.ref || tags.local_ref || '',
               trackSource: tags.ref ? 'ref' : tags.local_ref ? 'local_ref' : 'unknown', osmType: item.type, osmId: item.id,
               geometry: [axis[0], axis[1]], length: axis[2], height: tags.height,
