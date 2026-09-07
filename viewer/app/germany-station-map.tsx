@@ -1551,7 +1551,7 @@ export function SelectedStationMap({
     {
       key: 'rinf',
       databaseKey: 'era-rinf',
-      name: 'ERA Infrastrukturregister RINF',
+      name: 'ERA Infrastrukturregister RINF (rinf-plus)',
       quality: 'A',
       state: sourceState(dbSources.rinf),
     },

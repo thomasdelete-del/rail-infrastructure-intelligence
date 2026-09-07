@@ -58,7 +58,7 @@ def parse_db_platform_table(document: str) -> list[dict[str, Any]]:
 
 
 def parse_rinf_lengths(data: dict[str, Any]) -> list[dict[str, Any]]:
-    rows = []
+    rows_by_platform: dict[tuple[str, float, str | None, str], dict[str, Any]] = {}
     for binding in data.get("results", {}).get("bindings", []):
         def value(key: str) -> str | None:
             item = binding.get(key)
@@ -67,8 +67,23 @@ def parse_rinf_lengths(data: dict[str, Any]) -> list[dict[str, Any]]:
             length = float(value("length") or "")
         except ValueError:
             continue
-        rows.append({"platform_id": (value("platformId") or "").strip(), "track_id": value("trackId"), "usable_length_m": length, "uopid": value("uopid"), "source_url": value("platform") or RINF_ENDPOINT})
-    return rows
+        platform_id = (value("platformId") or "").strip()
+        if not platform_id:
+            continue
+        source_url = value("platform") or RINF_ENDPOINT
+        key = (platform_id, length, value("uopid"), source_url)
+        row = rows_by_platform.setdefault(key, {
+            "platform_id": platform_id,
+            "track_id": value("trackId"),
+            "directional_track_ids": [],
+            "usable_length_m": length,
+            "uopid": value("uopid"),
+            "source_url": source_url,
+        })
+        track_id = value("trackId")
+        if track_id and track_id not in row["directional_track_ids"]:
+            row["directional_track_ids"].append(track_id)
+    return list(rows_by_platform.values())
 
 
 def map_rinf_platforms(db_platforms: list[dict[str, Any]], rinf_platforms: list[dict[str, Any]], ril: str) -> tuple[dict[str, dict[str, Any]], set[str]]:

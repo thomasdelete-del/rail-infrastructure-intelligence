@@ -30,6 +30,23 @@ def test_parses_rinf_usable_lengths():
     assert parse_rinf_lengths(data)[0]["usable_length_m"] == 112.0
 
 
+def test_rinf_plus_collapses_directional_tracks_with_same_platform_id():
+    def binding(track_id: str):
+        return {
+            "uopid": {"value": "DE0FBEI"},
+            "platformId": {"value": "1"},
+            "trackId": {"value": track_id},
+            "length": {"value": "112"},
+            "platform": {"value": "https://example.test/platform/1"},
+        }
+
+    rows = parse_rinf_lengths({"results": {"bindings": [binding("1_A"), binding("1_B")]}})
+
+    assert len(rows) == 1
+    assert rows[0]["platform_id"] == "1"
+    assert rows[0]["directional_track_ids"] == ["1_A", "1_B"]
+
+
 def test_maps_bruchenbruecken_crosswalk_and_unique_remainder():
     db = [{"track": "1"}, {"track": "2"}]
     rinf = [

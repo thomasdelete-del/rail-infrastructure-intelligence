@@ -8,7 +8,7 @@ from app.collectors.osm import ROOT_OBJECT_KEY
 from app.identity import FRIEDBERG_HESS, is_friedberg_hess
 
 
-RINF_ENDPOINT = "https://graph.data.era.europa.eu/repositories/rinf"
+RINF_ENDPOINT = "https://graph.data.era.europa.eu/repositories/rinf-plus"
 FRIEDBERG_UOPID = "DE00FFG"
 KNOWN_PLATFORM_IDS = {"1", "1a", "2", "4", "5", "7", "8", "10", "11", "12"}
 

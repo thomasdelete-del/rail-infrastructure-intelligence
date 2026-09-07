@@ -292,7 +292,7 @@ def source_status():
         {"key": "db-infrago-openstation-netex", "name": "DB InfraGO OpenStation / NeTEx", "configured": True, "quality_class": "A"},
         {"key": "openstreetmap", "name": "OpenStreetMap", "configured": True, "quality_class": "D"},
         {"key": "geoportal-hessen-dop20", "name": "Geodatenviewer Hessen / DOP20", "configured": True, "quality_class": "A"},
-        {"key": "era-rinf", "name": "ERA Infrastrukturregister RINF", "configured": True, "quality_class": "A"},
+        {"key": "era-rinf", "name": "ERA Infrastrukturregister RINF (rinf-plus)", "configured": True, "quality_class": "A"},
         {"key": "db-infrago-stada", "name": "DB InfraGO StaDa", "configured": stada.configured, "quality_class": "A"},
         {"key": "db-infrago-fasta", "name": "DB InfraGO FaSta", "configured": fasta.configured, "quality_class": "A"},
     ]}
