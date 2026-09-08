@@ -22,6 +22,7 @@ from app.services.station_identity import netex_xml, prioritize_station_identity
 from app.services.dynamic_station_sources import collect_db_station_sources
 from app.services.platform_data import load_platform_data
 from app.services.osm_platforms import load_osm_platforms
+from app.services.platform_matching import fetch_station_data, sync_all_stations
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
 app.add_middleware(
@@ -44,6 +45,23 @@ def health(): return {"status": "ok"}
 
 @app.get("/health/database")
 def health_database(): return {"status": "ok" if database_health() else "error"}
+
+
+@app.get("/matching/stations/fetch")
+async def matching_fetch_station(rl100: str | None = None, stel_id: str | None = None):
+    try:
+        return await fetch_station_data(rl100, stel_id)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="Matching source temporarily unavailable") from error
+
+
+@app.post("/matching/stations/sync")
+async def matching_sync_all(concurrency: int = Query(default=75, ge=1, le=100)):
+    return await sync_all_stations(concurrency)
 
 @app.get("/sources/freshness")
 def source_freshness():

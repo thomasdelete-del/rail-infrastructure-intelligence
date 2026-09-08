@@ -126,3 +126,34 @@ CREATE TABLE IF NOT EXISTS station_location_snapshot (
 );
 CREATE INDEX IF NOT EXISTS idx_station_location_snapshot_name
     ON station_location_snapshot (name);
+
+CREATE TABLE IF NOT EXISTS betriebsstelle (
+    stel_id TEXT PRIMARY KEY,
+    ds100_rl100 TEXT NOT NULL UNIQUE,
+    bahnhofsname TEXT NOT NULL,
+    streckennummer TEXT,
+    personenverkehr BOOLEAN NOT NULL DEFAULT FALSE,
+    last_checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS bahnsteige (
+    ds100_rl100 TEXT NOT NULL,
+    isr_gleisnummer_betrieb TEXT NOT NULL,
+    eva_nummer TEXT,
+    bahnhofsname TEXT NOT NULL,
+    streckennummer TEXT,
+    osm_bahnsteig_ref TEXT,
+    isr_gleisnummer_verkehr TEXT,
+    isr_systemhoehe_cm NUMERIC,
+    isr_bahnsteignutzlaenge_m NUMERIC,
+    rinf_uopid TEXT,
+    rinf_platform_id TEXT,
+    rinf_track_id TEXT,
+    match_methode TEXT NOT NULL,
+    anmerkungen TEXT,
+    last_checked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    source_hash CHAR(64) NOT NULL,
+    PRIMARY KEY (ds100_rl100, isr_gleisnummer_betrieb)
+);
+CREATE INDEX IF NOT EXISTS idx_bahnsteige_station ON bahnsteige (ds100_rl100);
