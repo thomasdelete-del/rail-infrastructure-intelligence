@@ -609,34 +609,36 @@ export function SelectedStationMap({
               status: { db_infrago?: string; era_rinf?: string };
             };
             let platforms = data.platforms;
-            if (!platforms.length) {
-              const matchingResponse = await fetch(
-                `${API}/matching/stations/fetch?${new URLSearchParams({ rl100: value.ril })}`,
-                { cache: 'no-store', signal: controller.signal },
-              );
-              if (matchingResponse.ok) {
-                const matching = (await matchingResponse.json()) as {
-                  rows: Array<{
-                    isr_gleisnummer_betrieb: string;
-                    isr_systemhoehe_cm?: number | null;
-                    isr_bahnsteignutzlaenge_m?: number | null;
-                    rinf_platform_id?: string | null;
-                    rinf_track_id?: string | null;
-                    streckennummer?: string | null;
-                    match_methode: string;
-                    anmerkungen?: string | null;
-                  }>;
-                };
-                platforms = matching.rows.map((row) => ({
+            const matchingResponse = await fetch(
+              `${API}/matching/stations/fetch?${new URLSearchParams({ rl100: value.ril })}`,
+              { cache: 'no-store', signal: controller.signal },
+            );
+            if (matchingResponse.ok) {
+              const matching = (await matchingResponse.json()) as {
+                rows: Array<{
+                  isr_gleisnummer_betrieb: string;
+                  isr_systemhoehe_cm?: number | null;
+                  isr_bahnsteignutzlaenge_m?: number | null;
+                  rinf_platform_id?: string | null;
+                  rinf_track_id?: string | null;
+                  streckennummer?: string | null;
+                  match_methode: string;
+                  anmerkungen?: string | null;
+                }>;
+              };
+              platforms = matching.rows.map((row) => {
+                const existing = platforms.find(
+                  (item) =>
+                    normalizeTrackRef(item.track) ===
+                    normalizeTrackRef(row.isr_gleisnummer_betrieb),
+                );
+                return {
+                  ...existing,
                   track: row.isr_gleisnummer_betrieb,
                   platform_height_mm:
                     row.isr_systemhoehe_cm == null
                       ? null
                       : Number(row.isr_systemhoehe_cm) * 10,
-                  net_construction_length_m:
-                    row.isr_bahnsteignutzlaenge_m == null
-                      ? null
-                      : Number(row.isr_bahnsteignutzlaenge_m),
                   usable_length_m:
                     row.isr_bahnsteignutzlaenge_m == null
                       ? null
@@ -657,14 +659,14 @@ export function SelectedStationMap({
                       : []),
                     ...(row.anmerkungen ? [row.anmerkungen] : []),
                   ],
-                }));
-                data.status.db_infrago = 'active';
-                data.status.era_rinf = platforms.some(
-                  (item) => item.rinf_platform_id,
-                )
-                  ? 'active'
-                  : 'not_found';
-              }
+                };
+              });
+              data.status.db_infrago = 'active';
+              data.status.era_rinf = platforms.some(
+                (item) => item.rinf_platform_id,
+              )
+                ? 'active'
+                : 'not_found';
             }
             if (platforms.some((item) => item.usable_length_m != null))
               localStorage.setItem(
@@ -1819,7 +1821,7 @@ export function SelectedStationMap({
       ? ['DB-Nettobaulänge fehlt']
       : []),
     ...(platformRows.some(({ data }) => data?.usable_length_m == null)
-      ? ['RINF-Nutzlänge fehlt']
+      ? ['ISR-Bahnsteignutzlänge fehlt']
       : []),
     ...(inventoryCounts.entrance > 0 && counts.entrances === 0
       ? ['Zugang nicht verortet']
@@ -1892,7 +1894,7 @@ export function SelectedStationMap({
           subject,
           attribute: 'RINF platformId',
           value: data?.rinf_platform_id ?? 'Nicht geliefert oder zugeordnet',
-          source: rinfSource,
+          source: 'DB ISR',
         },
         {
           subject,
@@ -2674,13 +2676,7 @@ export function SelectedStationMap({
                     {data?.usable_length_m != null ? (
                       <div className="data-value">
                         <strong>{data.usable_length_m.toFixed(1)} m</strong>
-                        <span>
-                          RINF {data.rinf_platform_id || track}
-                          {data.rinf_platform_id &&
-                          data.rinf_platform_id !== track
-                            ? ` → DB Gleis ${track}`
-                            : ''}
-                        </span>
+                        <span>DB ISR · Gleis {track}</span>
                         {data.rinf_track_id ? (
                           <span>
                             Track-ID {data.rinf_track_id} ·{' '}
@@ -2732,9 +2728,10 @@ export function SelectedStationMap({
       <div className="platform-data-note">
         <ShieldCheck size={16} />
         <p>
-          OSM-Geometrie, DB-Nettobaulänge und RINF-Nutzlänge bleiben getrennte
-          Quellen. Bestätigungen und Endpunktkorrekturen werden je Station
-          gespeichert; auffällige Werte werden nicht automatisch überschrieben.
+          OSM-Geometrie, DB-Nettobaulänge und ISR-Bahnsteignutzlänge bleiben
+          getrennte Quellen. Bestätigungen und Endpunktkorrekturen werden je
+          Station gespeichert; auffällige Werte werden nicht automatisch
+          überschrieben.
         </p>
       </div>
       <section className="pilot-summary-grid" aria-label="Qualitätsübersicht">
@@ -2837,17 +2834,20 @@ export function SelectedStationMap({
                       ) : null}
                     </div>
                     <div>
+                      <b>DB ISR</b>
+                      <span>
+                        Bahnsteignutzlänge:{' '}
+                        {data?.usable_length_m != null
+                          ? `${data.usable_length_m.toFixed(1)} m`
+                          : 'nicht geliefert'}
+                      </span>
+                    </div>
+                    <div>
                       <b>ERA RINF · rinf-plus</b>
                       <span>
                         {data?.rinf_platform_id
                           ? `platformId ${data.rinf_platform_id}${data.rinf_platform_id !== track ? ` → Gleis ${track}` : ''}`
                           : 'Nicht zugeordnet'}
-                      </span>
-                      <span>
-                        Nutzlänge:{' '}
-                        {data?.usable_length_m != null
-                          ? `${data.usable_length_m.toFixed(1)} m`
-                          : 'nicht geliefert'}
                       </span>
                       {data?.rinf_line_number ? (
                         <span>Streckennummer: {data.rinf_line_number}</span>
