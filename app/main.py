@@ -20,7 +20,7 @@ from app.services.aerial_analysis import analyse_osm_platform
 from app.services.aerial_learning import store_training_sample
 from app.services.station_identity import netex_xml, prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_stada_identity, resolve_station_identity, search_netex_stations, stada_station_list
 from app.services.dynamic_station_sources import collect_db_station_sources
-from app.services.platform_data import load_platform_data, sync_db_platform_dimensions
+from app.services.platform_data import load_platform_data
 from app.services.osm_platforms import load_osm_platforms
 from app.services.platform_matching import fetch_station_data, load_matching_statistics, sync_all_stations, sync_osm_station_identities
 
@@ -30,7 +30,6 @@ _matching_sync_status: dict = {
     "status": "pending", "started_at": None, "completed_at": None, "error": None,
     "sources": {
         "db_infrago": {"status": "pending", "records": 0},
-        "netex": {"status": "pending", "records": 0},
         "isr": {"status": "pending", "records": 0},
         "osm": {"status": "pending", "records": 0},
     },
@@ -92,14 +91,6 @@ async def _run_matching_sync() -> None:
                 sources["osm"].update(status="failed", error=result["source_errors"]["osm"])
             else:
                 sources["osm"].update(status="completed", records=result.get("stations", 0))
-        sources["netex"]["status"] = "running"
-        try:
-            netex_result = await sync_db_platform_dimensions()
-            sources["netex"].update(status="completed", records=netex_result["rows"])
-            result["netex"] = netex_result
-        except Exception as error:
-            sources["netex"].update(status="failed", error=str(error))
-            result.setdefault("source_errors", {})["netex"] = f"{type(error).__name__}: {error}"
         final_status = "partial" if any(source["status"] == "failed" for source in sources.values()) else "completed"
         _matching_sync_status.update(status=final_status, completed_at=datetime.now(UTC), result=result)
     except Exception as error:
