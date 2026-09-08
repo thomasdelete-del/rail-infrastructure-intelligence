@@ -1205,7 +1205,7 @@ export function SelectedStationMap({
             edge.geometry.map(
               (point) => [point.lat, point.lon] as [number, number],
             ),
-            { color: '#00a6c7', weight: 5, opacity: 0.9 },
+            { color: '#00a6c7', weight: 2, opacity: 0.9 },
           ).addTo(instance!);
           L.polyline(
             edge.geometry.map(
@@ -1222,14 +1222,14 @@ export function SelectedStationMap({
           const start = edge.geometry[0],
             end = edge.geometry.at(-1)!;
           L.circleMarker([start.lat, start.lon], {
-            radius: 5,
+            radius: 3,
             color: '#fff',
             weight: 2,
             fillColor: '#20a464',
             fillOpacity: 1,
           }).addTo(instance!);
           L.circleMarker([end.lat, end.lon], {
-            radius: 5,
+            radius: 3,
             color: '#fff',
             weight: 2,
             fillColor: '#d54532',
@@ -1374,7 +1374,7 @@ export function SelectedStationMap({
       if (geometry.length >= 2) {
         L.polyline(
           geometry.map((point) => [point.lat, point.lon] as [number, number]),
-          { color: '#f5a623', weight: 7, opacity: 0.95 },
+          { color: '#f5a623', weight: 3, opacity: 0.95 },
         )
           .bindTooltip(
             `Geprüfte Bahnsteigkante · Gleis ${escapeHtml(currentReview.edge.track)}`,
@@ -1403,7 +1403,7 @@ export function SelectedStationMap({
               .addTo(target);
           } else if (status === 'correct') {
             L.circleMarker([point.lat, point.lon], {
-              radius: 9,
+              radius: 5,
               color: '#fff',
               weight: 3,
               fillColor: '#20845a',
@@ -1413,7 +1413,7 @@ export function SelectedStationMap({
               .addTo(target);
           } else if (status === 'none') {
             L.circleMarker([point.lat, point.lon], {
-              radius: 10,
+              radius: 5,
               color: '#c23b30',
               weight: 4,
               fillColor: '#fff',
@@ -1424,7 +1424,7 @@ export function SelectedStationMap({
               .addTo(target);
           } else {
             L.circleMarker([point.lat, point.lon], {
-              radius: 8,
+              radius: 4,
               color: '#fff',
               weight: 3,
               fillColor: baseColor,
@@ -1449,7 +1449,7 @@ export function SelectedStationMap({
       ] as [number, number];
       L.polyline([candidateStart, candidateEnd], {
         color: '#00c7df',
-        weight: 5,
+        weight: 2,
         opacity: 0.95,
         dashArray: '10 7',
       })
@@ -1458,7 +1458,7 @@ export function SelectedStationMap({
         )
         .addTo(target);
       L.circleMarker(candidateStart, {
-        radius: 9,
+        radius: 5,
         color: '#063b55',
         weight: 3,
         fillColor: '#00d4e8',
@@ -1467,7 +1467,7 @@ export function SelectedStationMap({
         .bindTooltip('Erkannter Anfang im Luftbild')
         .addTo(target);
       L.circleMarker(candidateEnd, {
-        radius: 9,
+        radius: 5,
         color: '#063b55',
         weight: 3,
         fillColor: '#00d4e8',
@@ -1486,7 +1486,7 @@ export function SelectedStationMap({
       if (currentPoint)
         L.polyline([[currentPoint.lat, currentPoint.lon], candidatePoint], {
           color: shift != null && shift <= 2 ? '#20845a' : '#d54532',
-          weight: 3,
+          weight: 2,
           opacity: 0.9,
           dashArray: '4 5',
         })
