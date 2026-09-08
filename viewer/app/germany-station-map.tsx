@@ -190,6 +190,21 @@ const geometryLength = (geometry: Array<{ lat: number; lon: number }>) =>
     .slice(1)
     .reduce((sum, point, index) => sum + distance(geometry[index], point), 0);
 
+const platformLongAxis = (geometry: Array<{ lat: number; lon: number }>) => {
+  let axis: Array<{ lat: number; lon: number }> = [];
+  let longest = 0;
+  geometry.forEach((start, startIndex) =>
+    geometry.slice(startIndex + 1).forEach((end) => {
+      const length = distance(start, end);
+      if (length > longest) {
+        longest = length;
+        axis = [start, end];
+      }
+    }),
+  );
+  return axis;
+};
+
 export function SelectedStationMap({
   station,
   onBack,
@@ -687,6 +702,7 @@ export function SelectedStationMap({
               const matching = (await matchingResponse.json()) as {
                 rows: Array<{
                   isr_gleisnummer_betrieb: string;
+                  isr_gleisnummer_verkehr?: string | null;
                   isr_systemhoehe_cm?: number | null;
                   isr_bahnsteignutzlaenge_m?: number | null;
                   rinf_platform_id?: string | null;
@@ -697,14 +713,24 @@ export function SelectedStationMap({
                 }>;
               };
               platforms = matching.rows.map((row) => {
+                const publicTrack = row.isr_gleisnummer_verkehr?.trim();
                 const existing = platforms.find(
                   (item) =>
-                    normalizeTrackRef(item.track) ===
-                    normalizeTrackRef(row.isr_gleisnummer_betrieb),
-                );
+                    [row.isr_gleisnummer_betrieb, publicTrack]
+                      .filter(Boolean)
+                      .some(
+                        (track) =>
+                          normalizeTrackRef(item.track) ===
+                          normalizeTrackRef(track!),
+                      ),
+                ) ??
+                  (platforms.length === 1 && matching.rows.length === 1
+                    ? platforms[0]
+                    : undefined);
+                const displayTrack = existing?.track || publicTrack || row.isr_gleisnummer_betrieb;
                 return {
                   ...existing,
-                  track: row.isr_gleisnummer_betrieb,
+                  track: displayTrack,
                   platform_height_mm:
                     row.isr_systemhoehe_cm == null
                       ? null
@@ -1093,6 +1119,23 @@ export function SelectedStationMap({
               item.geometry.map((p) => [p.lat, p.lon] as [number, number]),
               { color: '#0b5278', weight: 3, opacity: 0.55 },
             ).addTo(instance!);
+            const axis = platformLongAxis(item.geometry);
+            if (axis.length === 2) {
+              explicitEdges.push({
+                id: `${item.type}-${item.id}`,
+                track: tags.ref || tags.local_ref || 'ohne Nummer',
+                trackSource: tags.ref
+                  ? 'ref'
+                  : tags.local_ref
+                    ? 'local_ref'
+                    : 'unknown',
+                osmType: item.type,
+                osmId: item.id,
+                geometry: axis,
+                length: geometryLength(axis),
+                height: tags.height,
+              });
+            }
           } else {
             const lat = item.lat ?? item.center?.lat,
               lon = item.lon ?? item.center?.lon;
@@ -1121,7 +1164,7 @@ export function SelectedStationMap({
         const edges = friedbergPilotEdges.length
           ? [...friedbergPilotEdges]
           : [...explicitEdges];
-        if (edges.length === 1 && !edges[0].track) {
+        if (edges.length === 1 && !hasTrackNumber(edges[0].track)) {
           edges[0].track = '1';
           edges[0].trackSource = 'single_platform_fallback';
         }
