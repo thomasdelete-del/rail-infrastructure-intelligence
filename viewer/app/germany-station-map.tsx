@@ -2584,9 +2584,17 @@ export function SelectedStationMap({
               const plausibility = geometryPlausibility(edge);
               const confirmed = edge ? Boolean(osmConfirmed[edge.id]) : false;
               const dbNeedsReview = confirmed && comparison?.level === 'high';
+              const loadingField = (label: string) => (
+                <span className="field-loading" role="status">
+                  <LoaderCircle size={16} aria-hidden="true" />
+                  {label} wird geladen …
+                </span>
+              );
               const coordinateContent = (endpoint: 'start' | 'end') => {
                 if (!edge)
-                  return (
+                  return osmGeometryStatus === 'loading' ? (
+                    loadingField('OSM-Koordinate')
+                  ) : (
                     <span className="data-missing">Keine OSM-Koordinate</span>
                   );
                 const point = endpoint === 'start' ? start : end;
@@ -2659,7 +2667,12 @@ export function SelectedStationMap({
                     </div>
                   </td>
                   <td>
-                    <div className="data-value">
+                    {platformDataLoading &&
+                    data?.platform_height_mm == null &&
+                    !edge?.height ? (
+                      loadingField('Bahnsteighöhe')
+                    ) : (
+                      <div className="data-value">
                       <strong>
                         {data?.platform_height_mm != null
                           ? `${data.platform_height_mm} mm`
@@ -2674,10 +2687,13 @@ export function SelectedStationMap({
                             ? 'OpenStreetMap · Ersatzwert'
                             : 'DB InfraGO · nicht geliefert'}
                       </span>
-                    </div>
+                      </div>
+                    )}
                   </td>
                   <td>
-                    {edge ? (
+                    {!edge && osmGeometryStatus === 'loading' ? (
+                      loadingField('OSM-Baulänge')
+                    ) : edge ? (
                       <div className="data-value">
                         {corrected ? (
                           <div className="updated-length">
@@ -2729,7 +2745,9 @@ export function SelectedStationMap({
                     )}
                   </td>
                   <td>
-                    {edge ? (
+                    {!edge && osmGeometryStatus === 'loading' ? (
+                      loadingField('OSM-Prüfdaten')
+                    ) : edge ? (
                       <button
                         type="button"
                         className={
@@ -2753,7 +2771,10 @@ export function SelectedStationMap({
                     )}
                   </td>
                   <td>
-                    {data?.net_construction_length_m != null ? (
+                    {platformDataLoading &&
+                    data?.net_construction_length_m == null ? (
+                      loadingField('DB-Nettobaulänge')
+                    ) : data?.net_construction_length_m != null ? (
                       <div
                         className={
                           dbNeedsReview ? 'db-length-review' : 'data-value'
@@ -2777,7 +2798,10 @@ export function SelectedStationMap({
                     )}
                   </td>
                   <td>
-                    {comparison && edge ? (
+                    {(platformDataLoading || osmGeometryStatus === 'loading') &&
+                    !comparison ? (
+                      loadingField('Längenvergleich')
+                    ) : comparison && edge ? (
                       <button
                         type="button"
                         className={`deviation deviation-${comparison.level} deviation-button`}
@@ -2803,7 +2827,9 @@ export function SelectedStationMap({
                     )}
                   </td>
                   <td>
-                    {data?.usable_length_m != null ? (
+                    {platformDataLoading && data?.usable_length_m == null ? (
+                      loadingField('ISR-Nutzlänge')
+                    ) : data?.usable_length_m != null ? (
                       <div className="data-value">
                         <strong>{data.usable_length_m.toFixed(1)} m</strong>
                         <span>DB ISR · Gleis {track}</span>
