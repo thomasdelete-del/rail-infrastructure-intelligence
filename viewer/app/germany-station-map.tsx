@@ -286,12 +286,22 @@ export function SelectedStationMap({
             '{}',
         ),
       );
-      setCorrectedGeometries(
-        JSON.parse(
-          localStorage.getItem(`station-coordinate-drafts:${station.id}`) ||
-            '{}',
-        ),
-      );
+      const drafts = JSON.parse(
+        localStorage.getItem(`station-coordinate-drafts:${station.id}`) || '{}',
+      ) as Record<string, Array<{ lat: number; lon: number }>>;
+      const gleis11Migration = `friedberg-gleis-11-source-reset:${station.id}`;
+      if (
+        /^Friedberg \(Hess/i.test(station.name) &&
+        !localStorage.getItem(gleis11Migration)
+      ) {
+        delete drafts['FRI-PE-11'];
+        localStorage.setItem(gleis11Migration, '1');
+        localStorage.setItem(
+          `station-coordinate-drafts:${station.id}`,
+          JSON.stringify(drafts),
+        );
+      }
+      setCorrectedGeometries(drafts);
     } catch {
       setOsmConfirmed({});
       setEndpointReviews({});
@@ -904,15 +914,6 @@ export function SelectedStationMap({
           if (pilotResponse.ok) {
             const pilotInventory =
               (await pilotResponse.json()) as StationInventory;
-            let pilotDrafts: Record<
-              string,
-              { latitude: number; longitude: number }
-            > = {};
-            try {
-              pilotDrafts = JSON.parse(
-                localStorage.getItem('friedberg-coordinate-drafts') ?? '{}',
-              ) as typeof pilotDrafts;
-            } catch {}
             friedbergPilotEdges = pilotInventory.objects
               .filter((object) => object.object_type === 'platform_edge')
               .flatMap((object) => {
@@ -930,14 +931,12 @@ export function SelectedStationMap({
                 const end = observation('end_coordinates') as
                   | { latitude?: unknown; longitude?: unknown }
                   | undefined;
-                const startDraft = pilotDrafts[`${object.object_key}:start`];
-                const endDraft = pilotDrafts[`${object.object_key}:end`];
                 const geometry = [
-                  startDraft ?? {
+                  {
                     latitude: Number(start?.latitude),
                     longitude: Number(start?.longitude),
                   },
-                  endDraft ?? {
+                  {
                     latitude: Number(end?.latitude),
                     longitude: Number(end?.longitude),
                   },
