@@ -71,6 +71,8 @@ type PlatformEdge = {
 };
 type AuthoritativePlatform = {
   track: string;
+  isr_operating_track?: string | null;
+  isr_public_track?: string | null;
   platform_height_mm?: number | null;
   net_construction_length_m?: number | null;
   usable_length_m?: number | null;
@@ -731,6 +733,8 @@ export function SelectedStationMap({
                 return {
                   ...existing,
                   track: displayTrack,
+                  isr_operating_track: row.isr_gleisnummer_betrieb,
+                  isr_public_track: publicTrack || null,
                   platform_height_mm:
                     row.isr_systemhoehe_cm == null
                       ? null
@@ -1980,53 +1984,37 @@ export function SelectedStationMap({
       source: 'DB InfraGO / NeTEx',
     },
     ...platformRows.flatMap(({ track, data }) => {
-      const rinfSource = 'ERA RINF · rinf-plus';
-      const subject = `ERA-Bahnsteigkante · DB Gleis ${track}`;
+      const subject = `ISR-Bahnsteigkante · Gleis ${track}`;
       return [
         {
-          subject: 'Gleis',
-          attribute: `DB-Gleis ${track}`,
-          value: data?.rinf_platform_id
-            ? `RINF platformId ${data.rinf_platform_id}`
-            : 'RINF-Bahnsteigkante nicht zugeordnet',
-          source: data?.rinf_platform_id
-            ? 'DB InfraGO + ERA RINF'
-            : 'DB InfraGO',
-        },
-        {
           subject,
-          attribute: 'RINF platformId',
-          value: data?.rinf_platform_id ?? 'Nicht geliefert oder zugeordnet',
+          attribute: 'ISR-Gleisnummer Betrieb',
+          value: data?.isr_operating_track ?? track,
           source: 'DB ISR',
         },
         {
           subject,
-          attribute: 'Bahnsteignutzlänge',
+          attribute: 'ISR-Gleisnummer Verkehr',
+          value: data?.isr_public_track ?? 'Nicht geliefert',
+          source: 'DB ISR',
+        },
+        {
+          subject,
+          attribute: 'ISR-Systemhöhe',
+          value:
+            data?.platform_height_mm != null
+              ? `${data.platform_height_mm} mm`
+              : 'Nicht geliefert',
+          source: 'DB ISR',
+        },
+        {
+          subject,
+          attribute: 'ISR-Bahnsteignutzlänge',
           value:
             data?.usable_length_m != null
               ? `${data.usable_length_m.toFixed(1)} m`
               : 'Nicht geliefert',
-          source: rinfSource,
-        },
-        {
-          subject,
-          attribute: 'RINF-Gleiskennungen je Richtung',
-          value: data?.rinf_directional_track_ids?.length
-            ? data.rinf_directional_track_ids.join(' · ')
-            : (data?.rinf_track_id ?? 'Nicht geliefert'),
-          source: rinfSource,
-        },
-        {
-          subject,
-          attribute: 'Nationale Streckennummer',
-          value: data?.rinf_line_number ?? 'Nicht geliefert',
-          source: rinfSource,
-        },
-        {
-          subject,
-          attribute: 'Zuordnung zum DB-Gleis',
-          value: `${mappingMethodLabel(data?.mapping_method)}${data?.mapping_score != null ? ` · ${data.mapping_score} Punkte` : ''}${data?.mapping_evidence?.length ? ` · ${data.mapping_evidence.join(' · ')}` : ''}`,
-          source: rinfSource,
+          source: 'DB ISR',
         },
       ];
     }),
