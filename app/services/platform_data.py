@@ -185,7 +185,7 @@ def _railway_platform_data(ril: str) -> list[dict[str, Any]]:
     """Read the persisted primary platform dimensions before using live sources."""
     with get_engine().connect() as connection:
         rows = connection.execute(text("""
-            SELECT isr_gleisnummer_betrieb AS track,
+            SELECT COALESCE(NULLIF(isr_gleisnummer_verkehr, ''), isr_gleisnummer_betrieb) AS track,
                    db_bahnsteighoehe_mm AS platform_height_mm,
                    db_nettobaulaenge_m AS net_construction_length_m,
                    rinf_platform_id, rinf_track_id, streckennummer AS rinf_line_number
@@ -207,10 +207,11 @@ def _store_db_platform_data(ril: str, rows: list[dict[str, Any]], source_url: st
             db_platform_source_url=:source_url,
             db_platform_checked_at=now()
         WHERE ds100_rl100=:ril
-          AND lower(isr_gleisnummer_betrieb)=lower(:track)
+          AND (lower(isr_gleisnummer_betrieb)=lower(:track)
+               OR lower(COALESCE(isr_gleisnummer_verkehr, ''))=lower(:track))
     """)
     with get_engine().begin() as connection:
-        connection.execute(statement, [
+        results = [
             {
                 "ril": ril,
                 "track": row["track"],
@@ -219,7 +220,20 @@ def _store_db_platform_data(ril: str, rows: list[dict[str, Any]], source_url: st
                 "source_url": source_url,
             }
             for row in rows
-        ])
+        ]
+        connection.execute(statement, results)
+        # A station with exactly one ISR edge and one DB edge is bijective even
+        # when ISR exposes an internal section code instead of a public number.
+        if len(rows) == 1:
+            connection.execute(text("""
+                UPDATE bahnsteige
+                SET db_bahnsteighoehe_mm=:height,
+                    db_nettobaulaenge_m=:length,
+                    db_platform_source_url=:source_url,
+                    db_platform_checked_at=now()
+                WHERE ds100_rl100=:ril
+                  AND (SELECT count(*) FROM bahnsteige WHERE ds100_rl100=:ril) = 1
+            """), results[0])
 
 
 async def sync_db_platform_dimensions(concurrency: int = 20) -> dict[str, int]:
