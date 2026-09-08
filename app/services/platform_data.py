@@ -6,6 +6,7 @@ from html import unescape
 import re
 from time import monotonic
 from typing import Any
+import unicodedata
 from urllib.parse import urljoin
 
 import httpx
@@ -37,7 +38,14 @@ RINF_PLATFORM_CROSSWALKS: dict[str, dict[str, str]] = {
 
 
 def _normalize(value: str) -> str:
-    return " ".join(value.casefold().replace("bahnhof", " ").split())
+    folded = "".join(
+        character
+        for character in unicodedata.normalize("NFKD", value)
+        if not unicodedata.combining(character)
+    ).casefold()
+    return " ".join(
+        re.sub(r"[^a-z0-9-]+", " ", folded.replace("bahnhof", " ")).split()
+    )
 
 
 def parse_equipment_index(document: str) -> dict[str, str]:
