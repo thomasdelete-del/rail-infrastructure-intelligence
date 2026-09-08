@@ -118,9 +118,9 @@ async def fetch_osm_identity(client: httpx.AsyncClient, rl100: str) -> str | Non
     query = f'[out:json][timeout:25];node["railway:ref"="{rl100}"];out tags;'
     pause = 2.0
     for attempt in range(4):
-        response = await client.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": "rail-infrastructure-intelligence/1.5"})
+        response = await client.get(OVERPASS_URL, params={"data": query}, headers={"Accept": "application/json", "User-Agent": "rail-infrastructure-intelligence/1.6"})
         if response.status_code in {406, 429, 502, 503, 504}:
-            response = await client.post(OVERPASS_FALLBACK_URL, data={"data": query}, headers={"User-Agent": "rail-infrastructure-intelligence/1.5"})
+            response = await client.get(OVERPASS_FALLBACK_URL, params={"data": query}, headers={"Accept": "application/json", "User-Agent": "rail-infrastructure-intelligence/1.6"})
         if response.status_code != 429:
             response.raise_for_status()
             elements = response.json().get("elements", [])
@@ -134,17 +134,18 @@ async def fetch_osm_identity(client: httpx.AsyncClient, rl100: str) -> str | Non
 
 async def fetch_osm_identities_bulk(client: httpx.AsyncClient) -> dict[str, str]:
     """Load Germany in small non-overlapping boxes to respect public Overpass slots."""
-    latitudes = (47.0, 49.25, 51.5, 53.75, 56.0)
-    longitudes = (5.0, 7.75, 10.5, 13.25, 16.0)
+    # Small non-overlapping tiles keep public Overpass response sizes bounded.
+    latitudes = tuple(47.0 + index * 1.125 for index in range(9))
+    longitudes = tuple(5.0 + index * 1.375 for index in range(9))
     identities: dict[str, str] = {}
     for south, north in zip(latitudes, latitudes[1:]):
         for west, east in zip(longitudes, longitudes[1:]):
             query = f'[out:json][timeout:40];node["railway:ref"]({south},{west},{north},{east});out tags;'
             pause = 5.0
             for attempt in range(5):
-                response = await client.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": "rail-infrastructure-intelligence/1.5"})
+                response = await client.get(OVERPASS_URL, params={"data": query}, headers={"Accept": "application/json", "User-Agent": "rail-infrastructure-intelligence/1.6"})
                 if response.status_code in {406, 429, 502, 503, 504}:
-                    response = await client.post(OVERPASS_FALLBACK_URL, data={"data": query}, headers={"User-Agent": "rail-infrastructure-intelligence/1.5"})
+                    response = await client.get(OVERPASS_FALLBACK_URL, params={"data": query}, headers={"Accept": "application/json", "User-Agent": "rail-infrastructure-intelligence/1.6"})
                 if response.status_code == 429:
                     if attempt == 4:
                         response.raise_for_status()
@@ -157,7 +158,7 @@ async def fetch_osm_identities_bulk(client: httpx.AsyncClient) -> dict[str, str]
                     if tags.get("railway:ref") and tags.get("uic_ref"):
                         identities[tags["railway:ref"].upper()] = tags["uic_ref"]
                 break
-            await asyncio.sleep(5)
+            await asyncio.sleep(1)
     return identities
 
 
