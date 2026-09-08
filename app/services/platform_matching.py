@@ -289,12 +289,43 @@ def cached_operational_point(rl100: str | None, stel_id: str | None) -> dict[str
             "BST_STELLE_NAME": row["bahnhofsname"], "STRNR": row["streckennummer"] or ""}
 
 
+def cached_platform_rows(rl100: str) -> list[dict[str, Any]]:
+    """Return authoritative ISR rows already persisted for a station.
+
+    RINF fields remain optional enrichment on the ISR row; they never determine
+    whether a platform or its usable length is returned.
+    """
+    with get_engine().connect() as connection:
+        rows = connection.execute(text("""
+            SELECT eva_nummer, ds100_rl100, bahnhofsname, streckennummer,
+                   osm_bahnsteig_ref, isr_gleisnummer_betrieb,
+                   isr_gleisnummer_verkehr, isr_systemhoehe_cm,
+                   isr_bahnsteignutzlaenge_m, rinf_uopid, rinf_platform_id,
+                   rinf_track_id, match_methode, anmerkungen
+            FROM bahnsteige
+            WHERE ds100_rl100=:rl100
+            ORDER BY isr_gleisnummer_betrieb
+        """), {"rl100": rl100.strip().upper()}).mappings().all()
+    return [dict(row) for row in rows]
+
+
 async def fetch_station_data(rl100: str | None = None, stel_id: str | None = None) -> dict[str, Any]:
     if not rl100 and not stel_id:
         raise ValueError("rl100 or stel_id is required")
+    station = cached_operational_point(rl100, stel_id)
+    if station:
+        cached_rows = cached_platform_rows(station["BST_RL100"])
+        if cached_rows:
+            return {
+                "station": station["BST_RL100"],
+                "rows": cached_rows,
+                "changed": 0,
+                "unchanged": len(cached_rows),
+                "source": "Railway PostgreSQL · DB ISR cache",
+            }
+
     year = datetime.now(UTC).year
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
-        station = cached_operational_point(rl100, stel_id)
         if not station:
             stations = await fetch_operational_points(client, year)
             cache_operational_points(stations)

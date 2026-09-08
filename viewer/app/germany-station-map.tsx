@@ -2774,7 +2774,7 @@ export function SelectedStationMap({
                       </div>
                     ) : (
                       <span className="data-missing">
-                        In RINF nicht zugeordnet
+                        In DB ISR nicht geliefert
                       </span>
                     )}
                   </td>
