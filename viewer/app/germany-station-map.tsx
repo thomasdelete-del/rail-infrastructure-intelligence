@@ -370,13 +370,19 @@ export function SelectedStationMap({
       const drafts = JSON.parse(
         localStorage.getItem(`station-coordinate-drafts:${station.id}`) || '{}',
       ) as Record<string, Array<{ lat: number; lon: number }>>;
-      const gleis11Migration = `friedberg-gleis-11-source-reset:${station.id}`;
+      const friedbergPilotMigration = `friedberg-pilot-geometry-reset-v2:${station.id}`;
       if (
         /^Friedberg \(Hess/i.test(station.name) &&
-        !localStorage.getItem(gleis11Migration)
+        !localStorage.getItem(friedbergPilotMigration)
       ) {
-        delete drafts['FRI-PE-11'];
-        localStorage.setItem(gleis11Migration, '1');
+        // Earlier review iterations stored complete candidate lines locally.
+        // They must not replace Friedberg's proven pilot OSM geometry. Clear
+        // these stale overlays once; newly approved corrections can be saved
+        // normally afterwards.
+        Object.keys(drafts).forEach((key) => {
+          if (/^FRI-PE-/i.test(key)) delete drafts[key];
+        });
+        localStorage.setItem(friedbergPilotMigration, '1');
         localStorage.setItem(
           `station-coordinate-drafts:${station.id}`,
           JSON.stringify(drafts),
@@ -745,9 +751,10 @@ export function SelectedStationMap({
                   isr_operating_track: row.isr_gleisnummer_betrieb,
                   isr_public_track: publicTrack || null,
                   platform_height_mm:
-                    row.isr_systemhoehe_cm == null
+                    existing?.platform_height_mm ??
+                    (row.isr_systemhoehe_cm == null
                       ? null
-                      : Number(row.isr_systemhoehe_cm) * 10,
+                      : Number(row.isr_systemhoehe_cm) * 10),
                   usable_length_m:
                     row.isr_bahnsteignutzlaenge_m == null
                       ? null
@@ -2662,7 +2669,9 @@ export function SelectedStationMap({
                       <span>
                         {data?.platform_height_mm != null
                           ? 'DB InfraGO'
-                          : 'OpenStreetMap'}
+                          : edge?.height
+                            ? 'OpenStreetMap · Ersatzwert'
+                            : 'DB InfraGO · nicht geliefert'}
                       </span>
                     </div>
                   </td>
