@@ -101,7 +101,7 @@ type ServerStatistics = {
     sources?: Record<
       'db_infrago' | 'isr' | 'osm',
       {
-        status: 'pending' | 'running' | 'completed' | 'failed';
+        status: 'pending' | 'running' | 'completed' | 'available' | 'failed';
         records?: number;
         error?: string | null;
       }
@@ -2869,8 +2869,9 @@ export function SelectedStationMap({
                       <small>
                         {source?.status === 'running'
                           ? 'Wird im Hintergrund geladen …'
-                          : source?.status === 'completed'
-                            ? `${(source.records ?? 0).toLocaleString('de-DE')} Datensätze verarbeitet`
+                          : source?.status === 'completed' ||
+                              source?.status === 'available'
+                            ? `${(source.records ?? 0).toLocaleString('de-DE')} Datensätze auf dem Server vorhanden`
                             : source?.status === 'failed'
                               ? 'Laden fehlgeschlagen'
                               : 'Wartet auf Verarbeitung'}
@@ -2976,6 +2977,15 @@ export function SelectedStationMap({
         <div className="generic-platform-overview">
           {platformRows.map(({ track, edge, data }, index) => {
             const check = lengthComparison(edge, data);
+            const usableLengthState =
+              data?.usable_length_m != null &&
+              data.net_construction_length_m != null &&
+              data.usable_length_m >= data.net_construction_length_m + 5 &&
+              check?.level === 'low'
+                ? 'good'
+                : check && check.level !== 'low'
+                  ? 'warning'
+                  : 'neutral';
             const reviewed = edge
               ? (['start', 'end'] as const).filter((endpoint) =>
                   Boolean(endpointReviews[`${edge.id}:${endpoint}`]),
@@ -3030,7 +3040,9 @@ export function SelectedStationMap({
                         </span>
                       ) : null}
                     </div>
-                    <div>
+                    <div
+                      className={`platform-source-isr platform-source-isr-${usableLengthState}`}
+                    >
                       <b>DB ISR</b>
                       <span>
                         Bahnsteignutzlänge:{' '}
@@ -3038,6 +3050,13 @@ export function SelectedStationMap({
                           ? `${data.usable_length_m.toFixed(1)} m`
                           : 'nicht geliefert'}
                       </span>
+                      {usableLengthState === 'good' ? (
+                        <small>
+                          ≥ 5 m länger als Nettobaulänge · OSM–DB gering
+                        </small>
+                      ) : usableLengthState === 'warning' ? (
+                        <small>OSM–DB-Abweichung prüfen</small>
+                      ) : null}
                     </div>
                     <div>
                       <b>ERA RINF · rinf-plus</b>

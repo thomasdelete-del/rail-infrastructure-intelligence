@@ -232,6 +232,28 @@ a:focus-visible {
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
+.platform-overview-sources .platform-source-isr-good {
+  border-color: #79bea0;
+  background: #e9f7ef;
+}
+.platform-overview-sources .platform-source-isr-good b,
+.platform-overview-sources .platform-source-isr-good small {
+  color: #176944;
+}
+.platform-overview-sources .platform-source-isr-warning {
+  border-color: #e2b24c;
+  background: #fff7df;
+}
+.platform-overview-sources .platform-source-isr-warning b,
+.platform-overview-sources .platform-source-isr-warning small {
+  color: #865600;
+}
+.platform-source-isr small {
+  margin-top: 3px;
+  font-size: 0.65rem;
+  font-weight: 750;
+  line-height: 1.3;
+}
 .platform-overview-sources .platform-overview-comparison {
   grid-column: 1 / -1;
   border-color: #cbd9de;
@@ -2252,7 +2274,8 @@ a:focus-visible {
   border-radius: 50%;
   background: #9aabb3;
 }
-.source-sync-completed .source-sync-dot {
+.source-sync-completed .source-sync-dot,
+.source-sync-available .source-sync-dot {
   background: #20845a;
 }
 .source-sync-failed .source-sync-dot {

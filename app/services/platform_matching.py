@@ -357,6 +357,24 @@ async def sync_all_stations(concurrency: int = 75) -> dict[str, Any]:
     return {**totals, "errors": errors, "source_errors": source_errors, "completed_at": datetime.now(UTC)}
 
 
+async def sync_osm_station_identities() -> dict[str, Any]:
+    """Refresh OSM crosswalks without reloading authoritative ISR rows."""
+    async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
+        identities = await fetch_osm_identities_bulk(client)
+    if identities:
+        statement = text("""
+            UPDATE bahnsteige
+            SET eva_nummer=:eva,
+                updated_at=CASE WHEN eva_nummer IS DISTINCT FROM :eva THEN now() ELSE updated_at END
+            WHERE ds100_rl100=:rl100
+        """)
+        with get_engine().begin() as connection:
+            connection.execute(statement, [
+                {"rl100": rl100, "eva": eva} for rl100, eva in identities.items()
+            ])
+    return {"stations": len(identities), "completed_at": datetime.now(UTC)}
+
+
 # Public aliases requested by embedding clients.
 fetchStationData = fetch_station_data
 syncAllStations = sync_all_stations

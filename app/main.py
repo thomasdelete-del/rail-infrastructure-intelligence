@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,7 +22,7 @@ from app.services.station_identity import netex_xml, prioritize_station_identity
 from app.services.dynamic_station_sources import collect_db_station_sources
 from app.services.platform_data import load_platform_data
 from app.services.osm_platforms import load_osm_platforms
-from app.services.platform_matching import fetch_station_data, load_matching_statistics, sync_all_stations
+from app.services.platform_matching import fetch_station_data, load_matching_statistics, sync_all_stations, sync_osm_station_identities
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
 _matching_sync_task: asyncio.Task | None = None
@@ -64,15 +64,33 @@ async def _run_matching_sync() -> None:
     try:
         sources["db_infrago"]["status"] = "running"
         stations = await stada_station_list()
-        sources["db_infrago"].update(status="completed", records=len(stations))
-        sources["isr"]["status"] = "running"
-        sources["osm"]["status"] = "running"
-        result = await sync_all_stations(25)
-        sources["isr"].update(status="completed", records=result.get("rows", 0))
-        if result.get("source_errors", {}).get("osm"):
-            sources["osm"].update(status="failed", error=result["source_errors"]["osm"])
+        sources["db_infrago"].update(status="available", records=len(stations))
+        statistics = load_matching_statistics()
+        last_checked = statistics.get("last_checked_at")
+        isr_is_current = (
+            statistics.get("platform_rows", 0) > 0
+            and last_checked is not None
+            and datetime.now(UTC) - last_checked.astimezone(UTC) < timedelta(hours=24)
+        )
+        if isr_is_current:
+            sources["isr"].update(status="available", records=statistics["platform_rows"])
+            sources["osm"]["status"] = "running"
+            try:
+                osm_result = await sync_osm_station_identities()
+                sources["osm"].update(status="completed", records=osm_result["stations"])
+                result = {"isr": "available", "osm": osm_result}
+            except Exception as error:
+                sources["osm"].update(status="failed", error=str(error))
+                result = {"isr": "available", "source_errors": {"osm": f"{type(error).__name__}: {error}"}}
         else:
-            sources["osm"].update(status="completed", records=result.get("stations", 0))
+            sources["isr"]["status"] = "running"
+            sources["osm"]["status"] = "running"
+            result = await sync_all_stations(25)
+            sources["isr"].update(status="completed", records=result.get("rows", 0))
+            if result.get("source_errors", {}).get("osm"):
+                sources["osm"].update(status="failed", error=result["source_errors"]["osm"])
+            else:
+                sources["osm"].update(status="completed", records=result.get("stations", 0))
         final_status = "partial" if any(source["status"] == "failed" for source in sources.values()) else "completed"
         _matching_sync_status.update(status=final_status, completed_at=datetime.now(UTC), result=result)
     except Exception as error:
