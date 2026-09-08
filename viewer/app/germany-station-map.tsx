@@ -99,7 +99,7 @@ type ServerStatistics = {
     completed_at?: string | null;
     error?: string | null;
     sources?: Record<
-      'db_infrago' | 'isr' | 'osm',
+      'db_infrago' | 'netex' | 'isr' | 'osm',
       {
         status: 'pending' | 'running' | 'completed' | 'available' | 'failed';
         records?: number;
@@ -2849,6 +2849,7 @@ export function SelectedStationMap({
               {(
                 [
                   ['db_infrago', 'DB InfraGO Stationsdaten'],
+                  ['netex', 'DB-Bahnsteigdaten (bahnhof.de/NeTEx)'],
                   ['isr', 'ISR-Bahnsteigdaten'],
                   ['osm', 'OSM-Zuordnungsdaten'],
                 ] as const

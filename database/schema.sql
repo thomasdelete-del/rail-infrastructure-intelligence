@@ -157,3 +157,8 @@ CREATE TABLE IF NOT EXISTS bahnsteige (
     PRIMARY KEY (ds100_rl100, isr_gleisnummer_betrieb)
 );
 CREATE INDEX IF NOT EXISTS idx_bahnsteige_station ON bahnsteige (ds100_rl100);
+
+ALTER TABLE bahnsteige ADD COLUMN IF NOT EXISTS db_bahnsteighoehe_mm NUMERIC;
+ALTER TABLE bahnsteige ADD COLUMN IF NOT EXISTS db_nettobaulaenge_m NUMERIC;
+ALTER TABLE bahnsteige ADD COLUMN IF NOT EXISTS db_platform_source_url TEXT;
+ALTER TABLE bahnsteige ADD COLUMN IF NOT EXISTS db_platform_checked_at TIMESTAMPTZ;

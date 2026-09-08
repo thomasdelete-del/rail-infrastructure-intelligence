@@ -9,8 +9,10 @@ from typing import Any
 from urllib.parse import urljoin
 
 import httpx
+from sqlalchemy import text
 
 from app.collectors.rinf import RINF_ENDPOINT
+from app.database import get_engine
 
 DB_EQUIPMENT_INDEX = "https://www.dbinfrago.com/web/bahnhoefe/leistungen/stationsnutzung/stationshalt/stationsausstattung"
 _INDEX_CACHE: tuple[float, dict[str, str]] | None = None
@@ -179,11 +181,105 @@ async def _equipment_index(client: httpx.AsyncClient) -> dict[str, str]:
         return _INDEX_CACHE[1]
 
 
+def _railway_platform_data(ril: str) -> list[dict[str, Any]]:
+    """Read the persisted primary platform dimensions before using live sources."""
+    with get_engine().connect() as connection:
+        rows = connection.execute(text("""
+            SELECT isr_gleisnummer_betrieb AS track,
+                   db_bahnsteighoehe_mm AS platform_height_mm,
+                   db_nettobaulaenge_m AS net_construction_length_m,
+                   rinf_platform_id, rinf_track_id, streckennummer AS rinf_line_number
+            FROM bahnsteige
+            WHERE ds100_rl100=:ril
+              AND (db_bahnsteighoehe_mm IS NOT NULL OR db_nettobaulaenge_m IS NOT NULL)
+            ORDER BY isr_gleisnummer_betrieb
+        """), {"ril": ril}).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def _store_db_platform_data(ril: str, rows: list[dict[str, Any]], source_url: str | None) -> None:
+    if not rows:
+        return
+    statement = text("""
+        UPDATE bahnsteige
+        SET db_bahnsteighoehe_mm=:height,
+            db_nettobaulaenge_m=:length,
+            db_platform_source_url=:source_url,
+            db_platform_checked_at=now()
+        WHERE ds100_rl100=:ril
+          AND lower(isr_gleisnummer_betrieb)=lower(:track)
+    """)
+    with get_engine().begin() as connection:
+        connection.execute(statement, [
+            {
+                "ril": ril,
+                "track": row["track"],
+                "height": row.get("platform_height_mm"),
+                "length": row.get("net_construction_length_m"),
+                "source_url": source_url,
+            }
+            for row in rows
+        ])
+
+
+async def sync_db_platform_dimensions(concurrency: int = 20) -> dict[str, int]:
+    """Persist bahnhof.de/NeTEx platform dimensions for all cached stations."""
+    with get_engine().connect() as connection:
+        stations = [dict(row) for row in connection.execute(text(
+            "SELECT ds100_rl100 AS ril, bahnhofsname AS name FROM betriebsstelle"
+        )).mappings().all()]
+    semaphore = asyncio.Semaphore(max(1, min(concurrency, 30)))
+    totals = {"stations": 0, "rows": 0, "failed": 0}
+    async with httpx.AsyncClient(timeout=45, follow_redirects=True, headers={"User-Agent": "rail-infrastructure-intelligence/1.6"}) as client:
+        index = await _equipment_index(client)
+
+        async def process(station: dict[str, str]) -> tuple[str, list[dict[str, Any]], str | None] | None:
+            normalized_name = _normalize(station["name"])
+            page_url = index.get(normalized_name)
+            if not page_url:
+                candidates = [url for indexed_name, url in index.items()
+                              if normalized_name in indexed_name.split() or indexed_name.endswith(normalized_name)]
+                if len(set(candidates)) == 1:
+                    page_url = candidates[0]
+            if not page_url:
+                return None
+            try:
+                async with semaphore:
+                    response = await client.get(page_url)
+                    response.raise_for_status()
+                return station["ril"], parse_db_platform_table(response.text), page_url
+            except httpx.HTTPError:
+                totals["failed"] += 1
+                return None
+
+        results = await asyncio.gather(*(process(station) for station in stations))
+    for result in results:
+        if result is None:
+            continue
+        ril, rows, source_url = result
+        _store_db_platform_data(ril, rows, source_url)
+        totals["stations"] += 1
+        totals["rows"] += len(rows)
+    return totals
+
+
 async def load_platform_data(name: str, ril: str) -> dict[str, Any]:
     """Combine DB platform dimensions with track-usable lengths from ERA RINF."""
     safe_ril = re.sub(r"[^A-Z0-9_]", "", ril.upper())
     if not safe_ril:
         raise ValueError("A valid RIL100 identifier is required")
+    try:
+        stored_platforms = _railway_platform_data(safe_ril)
+    except RuntimeError:
+        stored_platforms = []
+    if stored_platforms:
+        return {
+            "station": name,
+            "ril": safe_ril,
+            "platforms": stored_platforms,
+            "sources": {"db_infrago": "Railway PostgreSQL · bahnhof.de/NeTEx", "era_rinf": "Railway PostgreSQL · rinf-plus"},
+            "status": {"db_infrago": "cached", "era_rinf": "cached"},
+        }
     today = date.today().isoformat()
     query = f'''PREFIX era: <http://data.europa.eu/949/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -244,6 +340,10 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?lineId ?platform ?platformId ?length W
     if db_failed and rinf_failed:
         raise httpx.HTTPError("DB InfraGO and ERA RINF are temporarily unavailable")
     by_track, used_rinf_ids = map_rinf_platforms(db_platforms, rinf_platforms, safe_ril)
+    try:
+        _store_db_platform_data(safe_ril, db_platforms, page_url)
+    except RuntimeError:
+        pass
     platforms = []
     for row in db_platforms:
         usable = by_track.get(row["track"])
