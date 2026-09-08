@@ -687,7 +687,6 @@ export function SelectedStationMap({
               const matching = (await matchingResponse.json()) as {
                 rows: Array<{
                   isr_gleisnummer_betrieb: string;
-                  isr_gleisnummer_verkehr?: string | null;
                   isr_systemhoehe_cm?: number | null;
                   isr_bahnsteignutzlaenge_m?: number | null;
                   rinf_platform_id?: string | null;
@@ -698,19 +697,14 @@ export function SelectedStationMap({
                 }>;
               };
               platforms = matching.rows.map((row) => {
-                const publicTrack = row.isr_gleisnummer_verkehr?.trim();
-                const displayTrack = publicTrack ||
-                  (!hasTrackNumber(row.isr_gleisnummer_betrieb) && matching.rows.length === 1
-                    ? '1'
-                    : row.isr_gleisnummer_betrieb);
                 const existing = platforms.find(
                   (item) =>
                     normalizeTrackRef(item.track) ===
-                    normalizeTrackRef(displayTrack),
+                    normalizeTrackRef(row.isr_gleisnummer_betrieb),
                 );
                 return {
                   ...existing,
-                  track: displayTrack,
+                  track: row.isr_gleisnummer_betrieb,
                   platform_height_mm:
                     row.isr_systemhoehe_cm == null
                       ? null
