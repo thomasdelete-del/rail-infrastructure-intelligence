@@ -213,6 +213,45 @@ def upsert_rows(rows: list[dict[str, Any]]) -> dict[str, int]:
     return {"changed": changed, "unchanged": unchanged}
 
 
+def load_matching_statistics() -> dict[str, Any]:
+    """Return transparent completeness figures for the Railway materialization."""
+    with get_engine().connect() as connection:
+        total_stations = connection.execute(text("SELECT COUNT(*) FROM station_location_snapshot")).scalar_one()
+        cached_stations = connection.execute(text("SELECT COUNT(*) FROM betriebsstelle WHERE personenverkehr")).scalar_one()
+        row = connection.execute(text("""
+            SELECT
+              COUNT(*) AS stations_with_platforms,
+              COUNT(*) FILTER (WHERE primary_complete) AS primary_complete_stations,
+              COUNT(*) FILTER (WHERE rinf_complete) AS rinf_complete_stations,
+              COALESCE(SUM(platform_count), 0) AS platform_rows,
+              MAX(last_checked_at) AS last_checked_at
+            FROM (
+              SELECT ds100_rl100,
+                     COUNT(*) AS platform_count,
+                     BOOL_AND(NULLIF(isr_gleisnummer_betrieb, '') IS NOT NULL
+                              AND isr_systemhoehe_cm IS NOT NULL
+                              AND isr_bahnsteignutzlaenge_m IS NOT NULL) AS primary_complete,
+                     BOOL_AND(rinf_platform_id IS NOT NULL) AS rinf_complete,
+                     MAX(last_checked_at) AS last_checked_at
+              FROM bahnsteige
+              GROUP BY ds100_rl100
+            ) station
+        """)).mappings().one()
+    complete = int(row["primary_complete_stations"] or 0)
+    denominator = int(total_stations or 0)
+    return {
+        "total_stations": denominator,
+        "cached_isr_stations": int(cached_stations or 0),
+        "stations_with_platforms": int(row["stations_with_platforms"] or 0),
+        "primary_complete_stations": complete,
+        "primary_complete_percent": round(complete * 100 / denominator, 1) if denominator else 0,
+        "rinf_complete_stations": int(row["rinf_complete_stations"] or 0),
+        "platform_rows": int(row["platform_rows"] or 0),
+        "last_checked_at": row["last_checked_at"],
+        "complete_definition": "Alle ISR-Gleise der Station besitzen Gleisnummer, Bahnsteighöhe und Bahnsteignutzlänge.",
+    }
+
+
 def cache_operational_points(stations: list[dict[str, str]]) -> None:
     statement = text("""
         INSERT INTO betriebsstelle

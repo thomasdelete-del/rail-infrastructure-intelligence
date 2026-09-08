@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Layers3,
+  LoaderCircle,
   MapPin,
   RefreshCw,
   Satellite,
@@ -81,6 +82,17 @@ type AuthoritativePlatform = {
   mapping_confidence?: string | null;
   mapping_score?: number | null;
   mapping_evidence?: string[] | null;
+};
+type ServerStatistics = {
+  total_stations: number;
+  cached_isr_stations: number;
+  stations_with_platforms: number;
+  primary_complete_stations: number;
+  primary_complete_percent: number;
+  rinf_complete_stations: number;
+  platform_rows: number;
+  last_checked_at?: string | null;
+  complete_definition: string;
 };
 type InventoryObservation = {
   attribute: string;
@@ -214,6 +226,10 @@ export function SelectedStationMap({
   );
   const [imageryOpacity, setImageryOpacity] = useState(82);
   const [loading, setLoading] = useState(true);
+  const [platformDataLoading, setPlatformDataLoading] = useState(true);
+  const [serverStatistics, setServerStatistics] =
+    useState<ServerStatistics | null>(null);
+  const [statisticsLoading, setStatisticsLoading] = useState(true);
   const [osmGeometryStatus, setOsmGeometryStatus] = useState<
     'loading' | 'active' | 'unavailable'
   >('loading');
@@ -273,6 +289,16 @@ export function SelectedStationMap({
     station.latitude <= 51.66 &&
     station.longitude >= 7.77 &&
     station.longitude <= 10.24;
+  useEffect(() => {
+    setStatisticsLoading(true);
+    void fetch(`${API}/matching/statistics`, { cache: 'no-store' })
+      .then((response) =>
+        response.ok ? response.json() : Promise.reject(new Error()),
+      )
+      .then((statistics) => setServerStatistics(statistics as ServerStatistics))
+      .catch(() => setServerStatistics(null))
+      .finally(() => setStatisticsLoading(false));
+  }, [refreshNonce]);
   useEffect(() => {
     try {
       setOsmConfirmed(
@@ -537,6 +563,7 @@ export function SelectedStationMap({
     setIdentity(null);
     setDbSources({});
     setAuthoritativePlatforms([]);
+    setPlatformDataLoading(true);
     setInventory(null);
     setSelectedObjectKey(null);
     setAerialResults({});
@@ -740,7 +767,8 @@ export function SelectedStationMap({
             'Die Stationsstammdaten konnten nicht vollständig geladen werden.',
           );
         }
-      });
+      })
+      .finally(() => setPlatformDataLoading(false));
     return () => controller.abort();
   }, [station, refreshNonce]);
   useEffect(() => {
@@ -2440,6 +2468,16 @@ export function SelectedStationMap({
             </tr>
           </thead>
           <tbody>
+            {platformDataLoading ? (
+              <tr>
+                <td colSpan={9}>
+                  <span className="field-loading">
+                    <LoaderCircle size={17} aria-hidden="true" />
+                    Bahnsteig-, ISR-, RINF- und OSM-Daten werden geladen …
+                  </span>
+                </td>
+              </tr>
+            ) : null}
             {platformRows.map(({ track, edge, data }) => {
               const start = edge?.geometry[0],
                 end = edge?.geometry.at(-1);
@@ -2733,6 +2771,72 @@ export function SelectedStationMap({
           überschrieben.
         </p>
       </div>
+      <section
+        className="server-statistics"
+        aria-labelledby="server-statistics-title"
+      >
+        <div>
+          <h3 id="server-statistics-title">Datenbestand auf dem Server</h3>
+          <p>Stand der gespeicherten Stations- und Bahnsteigdaten</p>
+        </div>
+        {statisticsLoading ? (
+          <span className="field-loading">
+            <LoaderCircle size={17} aria-hidden="true" /> Statistik wird geladen
+            …
+          </span>
+        ) : serverStatistics ? (
+          <>
+            <div className="server-statistics-grid">
+              <div>
+                <strong>
+                  {serverStatistics.total_stations.toLocaleString('de-DE')}
+                </strong>
+                <span>Bahnhöfe gesamt</span>
+              </div>
+              <div>
+                <strong>
+                  {serverStatistics.stations_with_platforms.toLocaleString(
+                    'de-DE',
+                  )}
+                </strong>
+                <span>mit ISR-Bahnsteigdaten</span>
+              </div>
+              <div>
+                <strong>
+                  {serverStatistics.primary_complete_stations.toLocaleString(
+                    'de-DE',
+                  )}{' '}
+                  ·{' '}
+                  {serverStatistics.primary_complete_percent.toLocaleString(
+                    'de-DE',
+                  )}{' '}
+                  %
+                </strong>
+                <span>vollständige Primärdaten</span>
+              </div>
+              <div>
+                <strong>
+                  {serverStatistics.rinf_complete_stations.toLocaleString(
+                    'de-DE',
+                  )}
+                </strong>
+                <span>vollständig mit RINF ergänzt</span>
+              </div>
+              <div>
+                <strong>
+                  {serverStatistics.platform_rows.toLocaleString('de-DE')}
+                </strong>
+                <span>Bahnsteigkantensätze</span>
+              </div>
+            </div>
+            <small>{serverStatistics.complete_definition}</small>
+          </>
+        ) : (
+          <span className="data-missing">
+            Serverstatistik derzeit nicht verfügbar
+          </span>
+        )}
+      </section>
       <section className="pilot-summary-grid" aria-label="Qualitätsübersicht">
         <div>
           <h3>Datenlücken</h3>
