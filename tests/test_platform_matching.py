@@ -25,6 +25,7 @@ def test_merge_uses_isr_length_and_exact_rinf_platform_match():
     assert row["isr_bahnsteignutzlaenge_m"] == Decimal("140.5")
     assert row["rinf_platform_id"] == "1"
     assert row["match_methode"] == "ISR+RINF eindeutig"
+    assert row["osm_bahnsteig_ref"] is None
 
 
 def test_merge_marks_directional_prefix_matches_ambiguous_without_duplicate_db_rows():

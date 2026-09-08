@@ -178,7 +178,9 @@ def merge_platforms(station: dict[str, str], isr_rows: list[dict[str, str]], rin
         row = {
                 "eva_nummer": eva, "ds100_rl100": rl100,
                 "bahnhofsname": station.get("BST_STELLE_NAME", ""), "streckennummer": station.get("STRNR") or None,
-                "osm_bahnsteig_ref": traffic or None, "isr_gleisnummer_betrieb": operating,
+                # OSM is matched later as a supplementary geometry source. Do
+                # not mislabel the ISR traffic-track number as an OSM ref.
+                "osm_bahnsteig_ref": None, "isr_gleisnummer_betrieb": operating,
                 "isr_gleisnummer_verkehr": traffic or None,
                 "isr_systemhoehe_cm": _number(source.get("SYSTEMHÖHE_IN_CM")),
                 "isr_bahnsteignutzlaenge_m": _number(source.get("MAX__BAHNSTEIGNUTZLAENGEN_IN_M")),

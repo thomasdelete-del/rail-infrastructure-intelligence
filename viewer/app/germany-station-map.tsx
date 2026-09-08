@@ -33,6 +33,13 @@ const normalizeSearch = (value: string) =>
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLocaleLowerCase('de');
+const normalizeTrackRef = (value: string) =>
+  value
+    .trim()
+    .replace(/^Gleis\s+/i, '')
+    .replace(/\s+/g, '')
+    .toLocaleLowerCase('de');
+const hasTrackNumber = (value: string) => /\d/.test(value);
 const escapeHtml = (value: string) =>
   value.replace(
     /[&<>"']/g,
@@ -1151,17 +1158,27 @@ export function SelectedStationMap({
       edge?: PlatformEdge;
       data?: AuthoritativePlatform;
     }> = authoritativePlatforms.map((data) => {
-      const edge = platformEdges.find(
-        (candidate) => candidate.track === data.track,
-      );
+      const edge =
+        platformEdges.find(
+          (candidate) =>
+            hasTrackNumber(candidate.track) &&
+            normalizeTrackRef(candidate.track) ===
+              normalizeTrackRef(data.track),
+        ) ??
+        (authoritativePlatforms.length === 1
+          ? platformEdges.find((candidate) => !hasTrackNumber(candidate.track))
+          : undefined);
       if (edge) matched.add(edge.id);
       return { track: data.track, edge, data };
     });
-    platformEdges
-      .filter((edge) => !matched.has(edge.id))
-      .forEach((edge) =>
-        rows.push({ track: edge.track, edge, data: undefined }),
-      );
+    // DB InfraGO/ISR defines the platform inventory. OSM only supplies geometry
+    // for a matching track and must not create additional authoritative rows.
+    if (!authoritativePlatforms.length)
+      platformEdges
+        .filter((edge) => !matched.has(edge.id))
+        .forEach((edge) =>
+          rows.push({ track: edge.track, edge, data: undefined }),
+        );
     return rows.sort((a, b) =>
       a.track.localeCompare(b.track, 'de', { numeric: true }),
     );
