@@ -718,18 +718,15 @@ export function SelectedStationMap({
                 const publicTrack = row.isr_gleisnummer_verkehr?.trim();
                 const existing = platforms.find(
                   (item) =>
-                    [row.isr_gleisnummer_betrieb, publicTrack]
-                      .filter(Boolean)
-                      .some(
-                        (track) =>
-                          normalizeTrackRef(item.track) ===
-                          normalizeTrackRef(track!),
-                      ),
+                    Boolean(publicTrack) &&
+                    normalizeTrackRef(item.track) ===
+                      normalizeTrackRef(publicTrack!),
                 ) ??
                   (platforms.length === 1 && matching.rows.length === 1
                     ? platforms[0]
                     : undefined);
-                const displayTrack = existing?.track || publicTrack || row.isr_gleisnummer_betrieb;
+                const displayTrack =
+                  publicTrack || existing?.track || row.isr_gleisnummer_betrieb;
                 return {
                   ...existing,
                   track: displayTrack,

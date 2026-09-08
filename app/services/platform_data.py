@@ -48,6 +48,10 @@ def _normalize(value: str) -> str:
     )
 
 
+def _name_tokens(value: str) -> set[str]:
+    return {token for token in re.split(r"[\s-]+", _normalize(value)) if token}
+
+
 def parse_equipment_index(document: str) -> dict[str, str]:
     links: dict[str, str] = {}
     pattern = re.compile(r'href="(?P<href>[^"#]*?/stationsausstattung/[^"?]+)(?:\?[^\"]*)?"(?:(?!</a>).)*?<h3[^>]*>\s*(?P<name>[^<]+)', re.I | re.S)
@@ -219,8 +223,16 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?lineId ?platform ?platformId ?length W
             normalized_name = _normalize(name)
             page_url = index.get(normalized_name)
             if not page_url:
-                contained = [url for indexed_name, url in index.items()
-                             if normalized_name in indexed_name.split() or indexed_name.endswith(normalized_name)]
+                requested_tokens = _name_tokens(normalized_name)
+                contained = [
+                    url
+                    for indexed_name, url in index.items()
+                    if requested_tokens
+                    and (
+                        requested_tokens <= _name_tokens(indexed_name)
+                        or _name_tokens(indexed_name) <= requested_tokens
+                    )
+                ]
                 if len(set(contained)) == 1:
                     page_url = contained[0]
             if page_url:

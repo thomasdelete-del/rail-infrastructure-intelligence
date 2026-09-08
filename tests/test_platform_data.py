@@ -1,8 +1,9 @@
-from app.services.platform_data import _normalize, map_rinf_platforms, parse_db_platform_table, parse_equipment_index, parse_rinf_lengths
+from app.services.platform_data import _name_tokens, _normalize, map_rinf_platforms, parse_db_platform_table, parse_equipment_index, parse_rinf_lengths
 
 
 def test_station_name_normalization_matches_umlaut_and_parenthetical_spelling():
     assert _normalize("Dörheim (Wetterau)") == _normalize("Dorheim Wetterau")
+    assert _name_tokens("Dörheim (Wetterau)") == _name_tokens("Dorheim-Wetterau")
 
 
 def test_parses_db_platform_dimensions_from_compact_table():
