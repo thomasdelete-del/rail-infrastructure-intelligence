@@ -1391,11 +1391,12 @@ export function SelectedStationMap({
           const baseColor = endpoint === 'start' ? '#20a464' : '#d54532';
           const label = endpoint === 'start' ? 'Anfang' : 'Ende';
           if (status === 'corrected') {
+            const showTrackLabel = endpoint === currentReview.endpoint;
             L.marker([point.lat, point.lon], {
               icon: L.divIcon({
                 className: 'corrected-endpoint-icon',
-                html: `<span aria-hidden="true"></span><b>Gleis ${escapeHtml(currentReview.edge.track)}</b>`,
-                iconSize: [110, 18],
+                html: `<span aria-hidden="true"></span>${showTrackLabel ? `<b>Gleis ${escapeHtml(currentReview.edge.track)}</b>` : ''}`,
+                iconSize: showTrackLabel ? [110, 18] : [18, 18],
                 iconAnchor: [8, 8],
               }),
             })
