@@ -138,27 +138,40 @@ async def fetch_osm_identities_bulk(client: httpx.AsyncClient) -> dict[str, str]
     latitudes = tuple(47.0 + index * 1.125 for index in range(9))
     longitudes = tuple(5.0 + index * 1.375 for index in range(9))
     identities: dict[str, str] = {}
+    failed_tiles: list[tuple[float, float, float, float]] = []
     for south, north in zip(latitudes, latitudes[1:]):
         for west, east in zip(longitudes, longitudes[1:]):
             query = f'[out:json][timeout:40];node["railway:ref"]({south},{west},{north},{east});out tags;'
-            pause = 5.0
-            for attempt in range(5):
-                response = await client.get(OVERPASS_URL, params={"data": query}, headers={"Accept": "application/json", "User-Agent": "rail-infrastructure-intelligence/1.6"})
-                if response.status_code in {406, 429, 502, 503, 504}:
-                    response = await client.get(OVERPASS_FALLBACK_URL, params={"data": query}, headers={"Accept": "application/json", "User-Agent": "rail-infrastructure-intelligence/1.6"})
-                if response.status_code == 429:
-                    if attempt == 4:
-                        response.raise_for_status()
-                    await asyncio.sleep(pause)
-                    pause = min(pause * 2, 40)
-                    continue
-                response.raise_for_status()
-                for item in response.json().get("elements", []):
-                    tags = item.get("tags", {})
-                    if tags.get("railway:ref") and tags.get("uic_ref"):
-                        identities[tags["railway:ref"].upper()] = tags["uic_ref"]
-                break
+            pause = 1.0
+            tile_loaded = False
+            for attempt in range(3):
+                endpoint = OVERPASS_URL if attempt % 2 == 0 else OVERPASS_FALLBACK_URL
+                try:
+                    response = await client.get(endpoint, params={"data": query}, headers={"Accept": "application/json", "User-Agent": "rail-infrastructure-intelligence/1.6"})
+                    if response.status_code in {406, 429, 502, 503, 504}:
+                        raise httpx.HTTPStatusError(
+                            f"Overpass returned {response.status_code}",
+                            request=response.request,
+                            response=response,
+                        )
+                    response.raise_for_status()
+                    for item in response.json().get("elements", []):
+                        tags = item.get("tags", {})
+                        if tags.get("railway:ref") and tags.get("uic_ref"):
+                            identities[tags["railway:ref"].upper()] = tags["uic_ref"]
+                    tile_loaded = True
+                    break
+                except (httpx.RequestError, httpx.HTTPStatusError, ValueError):
+                    if attempt < 2:
+                        await asyncio.sleep(pause)
+                        pause *= 2
+            if not tile_loaded:
+                failed_tiles.append((south, west, north, east))
             await asyncio.sleep(1)
+    if failed_tiles and not identities:
+        raise httpx.ReadTimeout(
+            f"Keine OSM-Kachel erreichbar ({len(failed_tiles)} fehlgeschlagen)"
+        )
     return identities
 
 
