@@ -283,6 +283,19 @@ def cached_operational_point(rl100: str | None, stel_id: str | None) -> dict[str
         row = connection.execute(text(
             f"SELECT stel_id, ds100_rl100, bahnhofsname, streckennummer FROM betriebsstelle WHERE {where}"
         ), {"value": value}).mappings().first()
+    if not row and rl100:
+        requested = rl100.strip().upper()
+        with get_engine().connect() as connection:
+            candidates = connection.execute(text("""
+                SELECT stel_id, ds100_rl100, bahnhofsname, streckennummer
+                FROM betriebsstelle
+                WHERE ds100_rl100 LIKE :prefix
+                  AND length(ds100_rl100) = :expected_length
+                ORDER BY ds100_rl100
+                LIMIT 2
+            """), {"prefix": f"{requested}%", "expected_length": len(requested) + 1}).mappings().all()
+        if len(candidates) == 1:
+            row = candidates[0]
     if not row:
         return None
     return {"STEL_ID": row["stel_id"], "BST_RL100": row["ds100_rl100"],
@@ -313,6 +326,15 @@ async def fetch_station_data(rl100: str | None = None, stel_id: str | None = Non
     if not rl100 and not stel_id:
         raise ValueError("rl100 or stel_id is required")
     station = cached_operational_point(rl100, stel_id)
+    requested_rl100 = rl100.strip().upper() if rl100 else None
+    identifier_match = None
+    if station and requested_rl100 and station["BST_RL100"] != requested_rl100:
+        identifier_match = {
+            "requested": requested_rl100,
+            "matched": station["BST_RL100"],
+            "method": "unique_one_character_suffix",
+            "difference": station["BST_RL100"][len(requested_rl100):],
+        }
     if station:
         cached_rows = cached_platform_rows(station["BST_RL100"])
         if cached_rows:
@@ -322,6 +344,7 @@ async def fetch_station_data(rl100: str | None = None, stel_id: str | None = Non
                 "changed": 0,
                 "unchanged": len(cached_rows),
                 "source": "Railway PostgreSQL · DB ISR cache",
+                "identifier_match": identifier_match,
             }
 
     year = datetime.now(UTC).year
@@ -340,7 +363,7 @@ async def fetch_station_data(rl100: str | None = None, stel_id: str | None = Non
         )
     rows = merge_platforms(station, isr, rinf, eva)
     result = upsert_rows(rows)
-    return {"station": station_rl100, "rows": rows, **result, "last_checked_at": datetime.now(UTC)}
+    return {"station": station_rl100, "rows": rows, **result, "identifier_match": identifier_match, "last_checked_at": datetime.now(UTC)}
 
 
 async def sync_all_stations(concurrency: int = 75) -> dict[str, Any]:

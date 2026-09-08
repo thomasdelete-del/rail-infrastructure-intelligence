@@ -246,6 +246,11 @@ export function SelectedStationMap({
   const [authoritativePlatforms, setAuthoritativePlatforms] = useState<
     AuthoritativePlatform[]
   >([]);
+  const [isrIdentifierMatch, setIsrIdentifierMatch] = useState<{
+    requested: string;
+    matched: string;
+    difference: string;
+  } | null>(null);
   const [inventory, setInventory] = useState<StationInventory | null>(null);
   const [inventoryQuery, setInventoryQuery] = useState('');
   const [inventoryType, setInventoryType] = useState('all');
@@ -613,6 +618,7 @@ export function SelectedStationMap({
     setIdentity(null);
     setDbSources({});
     setAuthoritativePlatforms([]);
+    setIsrIdentifierMatch(null);
     setPlatformDataLoading(true);
     setInventory(null);
     setSelectedObjectKey(null);
@@ -702,6 +708,11 @@ export function SelectedStationMap({
             );
             if (matchingResponse.ok) {
               const matching = (await matchingResponse.json()) as {
+                identifier_match?: {
+                  requested: string;
+                  matched: string;
+                  difference: string;
+                } | null;
                 rows: Array<{
                   isr_gleisnummer_betrieb: string;
                   isr_gleisnummer_verkehr?: string | null;
@@ -714,6 +725,7 @@ export function SelectedStationMap({
                   anmerkungen?: string | null;
                 }>;
               };
+              setIsrIdentifierMatch(matching.identifier_match ?? null);
               platforms = matching.rows.map((row) => {
                 const publicTrack = row.isr_gleisnummer_verkehr?.trim();
                 const existing = platforms.find(
@@ -1974,6 +1986,16 @@ export function SelectedStationMap({
       value: identity?.ril ?? 'Nicht geliefert',
       source: 'DB InfraGO StaDa',
     },
+    ...(isrIdentifierMatch
+      ? [
+          {
+            subject: 'Strecke / Betriebsstelle',
+            attribute: 'Abweichende ISR-Betriebsstellenkennung',
+            value: `${isrIdentifierMatch.requested} → ${isrIdentifierMatch.matched} · zusätzliches Suffix „${isrIdentifierMatch.difference}“`,
+            source: 'DB InfraGO StaDa + DB ISR',
+          },
+        ]
+      : []),
     {
       subject: 'Strecke / Betriebsstelle',
       attribute: 'Streckenzuordnung',
