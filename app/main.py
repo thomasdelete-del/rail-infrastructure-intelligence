@@ -69,8 +69,12 @@ async def _run_matching_sync() -> None:
         sources["osm"]["status"] = "running"
         result = await sync_all_stations(25)
         sources["isr"].update(status="completed", records=result.get("rows", 0))
-        sources["osm"].update(status="completed", records=result.get("stations", 0))
-        _matching_sync_status.update(status="completed", completed_at=datetime.now(UTC), result=result)
+        if result.get("source_errors", {}).get("osm"):
+            sources["osm"].update(status="failed", error=result["source_errors"]["osm"])
+        else:
+            sources["osm"].update(status="completed", records=result.get("stations", 0))
+        final_status = "partial" if any(source["status"] == "failed" for source in sources.values()) else "completed"
+        _matching_sync_status.update(status=final_status, completed_at=datetime.now(UTC), result=result)
     except Exception as error:
         for source in sources.values():
             if source["status"] == "running":

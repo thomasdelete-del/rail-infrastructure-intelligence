@@ -17,6 +17,7 @@ from app.database import get_engine
 ISR_URL = "https://geoviewer.deutschebahn.com/geoviewer-geoserver/ows"
 RINF_URL = "https://graph.data.era.europa.eu/repositories/rinf-plus"
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_FALLBACK_URL = "https://overpass.kumi.systems/api/interpreter"
 BUSINESS_COLUMNS = (
     "eva_nummer", "ds100_rl100", "bahnhofsname", "streckennummer",
     "osm_bahnsteig_ref", "isr_gleisnummer_betrieb", "isr_gleisnummer_verkehr",
@@ -117,7 +118,9 @@ async def fetch_osm_identity(client: httpx.AsyncClient, rl100: str) -> str | Non
     query = f'[out:json][timeout:25];node["railway:ref"="{rl100}"];out tags;'
     pause = 2.0
     for attempt in range(4):
-        response = await client.post(OVERPASS_URL, data={"data": query})
+        response = await client.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": "rail-infrastructure-intelligence/1.5"})
+        if response.status_code in {406, 429, 502, 503, 504}:
+            response = await client.post(OVERPASS_FALLBACK_URL, data={"data": query}, headers={"User-Agent": "rail-infrastructure-intelligence/1.5"})
         if response.status_code != 429:
             response.raise_for_status()
             elements = response.json().get("elements", [])
@@ -139,7 +142,9 @@ async def fetch_osm_identities_bulk(client: httpx.AsyncClient) -> dict[str, str]
             query = f'[out:json][timeout:40];node["railway:ref"]({south},{west},{north},{east});out tags;'
             pause = 5.0
             for attempt in range(5):
-                response = await client.post(OVERPASS_URL, data={"data": query})
+                response = await client.post(OVERPASS_URL, data={"data": query}, headers={"User-Agent": "rail-infrastructure-intelligence/1.5"})
+                if response.status_code in {406, 429, 502, 503, 504}:
+                    response = await client.post(OVERPASS_FALLBACK_URL, data={"data": query}, headers={"User-Agent": "rail-infrastructure-intelligence/1.5"})
                 if response.status_code == 429:
                     if attempt == 4:
                         response.raise_for_status()
@@ -313,9 +318,21 @@ async def sync_all_stations(concurrency: int = 75) -> dict[str, Any]:
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as client:
         stations = await fetch_operational_points(client, year)
         cache_operational_points(stations)
-        rinf_by_uopid, osm_by_rl100 = await asyncio.gather(
-            fetch_rinf_all(client, year), fetch_osm_identities_bulk(client)
+        rinf_result, osm_result = await asyncio.gather(
+            fetch_rinf_all(client, year), fetch_osm_identities_bulk(client),
+            return_exceptions=True,
         )
+        source_errors = {}
+        if isinstance(rinf_result, Exception):
+            source_errors["rinf"] = f"{type(rinf_result).__name__}: {rinf_result}"
+            rinf_by_uopid = {}
+        else:
+            rinf_by_uopid = rinf_result
+        if isinstance(osm_result, Exception):
+            source_errors["osm"] = f"{type(osm_result).__name__}: {osm_result}"
+            osm_by_rl100 = {}
+        else:
+            osm_by_rl100 = osm_result
         semaphore = asyncio.Semaphore(max(1, min(concurrency, 100)))
         async def process(station: dict[str, str]):
             rl100 = station.get("BST_RL100", "").strip().upper()
@@ -336,7 +353,7 @@ async def sync_all_stations(concurrency: int = 75) -> dict[str, Any]:
         totals["rows"] += len(rows)
         totals["changed"] += write_result["changed"]
         totals["unchanged"] += write_result["unchanged"]
-    return {**totals, "errors": errors, "completed_at": datetime.now(UTC)}
+    return {**totals, "errors": errors, "source_errors": source_errors, "completed_at": datetime.now(UTC)}
 
 
 # Public aliases requested by embedding clients.

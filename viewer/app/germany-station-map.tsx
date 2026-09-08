@@ -94,7 +94,7 @@ type ServerStatistics = {
   last_checked_at?: string | null;
   complete_definition: string;
   sync?: {
-    status: 'pending' | 'running' | 'completed' | 'failed';
+    status: 'pending' | 'running' | 'completed' | 'partial' | 'failed';
     started_at?: string | null;
     completed_at?: string | null;
     error?: string | null;
@@ -2830,9 +2830,11 @@ export function SelectedStationMap({
                   ? 'ISR-Synchronisierung läuft im Hintergrund'
                   : serverStatistics.sync?.status === 'completed'
                     ? 'ISR-Synchronisierung abgeschlossen'
-                    : serverStatistics.sync?.status === 'failed'
-                      ? 'ISR-Synchronisierung unterbrochen'
-                      : 'ISR-Synchronisierung wird vorbereitet'}
+                    : serverStatistics.sync?.status === 'partial'
+                      ? 'Primärdaten geladen · ergänzende Quelle teilweise ausgefallen'
+                      : serverStatistics.sync?.status === 'failed'
+                        ? 'ISR-Synchronisierung unterbrochen'
+                        : 'ISR-Synchronisierung wird vorbereitet'}
               </strong>
               {serverStatistics.sync?.started_at ? (
                 <span>
