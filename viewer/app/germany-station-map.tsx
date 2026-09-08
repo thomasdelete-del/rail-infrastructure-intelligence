@@ -592,12 +592,73 @@ export function SelectedStationMap({
             `${API}/stations/platform-data?${platformParameters}`,
             { cache: 'no-store', signal: controller.signal },
           );
-          if (response.ok) {
-            const data = (await response.json()) as {
+          {
+            const data = (
+              response.ok
+                ? await response.json()
+                : { platforms: [], status: {} }
+            ) as {
               platforms: AuthoritativePlatform[];
               status: { db_infrago?: string; era_rinf?: string };
             };
             let platforms = data.platforms;
+            if (!platforms.length) {
+              const matchingResponse = await fetch(
+                `${API}/matching/stations/fetch?${new URLSearchParams({ rl100: value.ril })}`,
+                { cache: 'no-store', signal: controller.signal },
+              );
+              if (matchingResponse.ok) {
+                const matching = (await matchingResponse.json()) as {
+                  rows: Array<{
+                    isr_gleisnummer_betrieb: string;
+                    isr_systemhoehe_cm?: number | null;
+                    isr_bahnsteignutzlaenge_m?: number | null;
+                    rinf_platform_id?: string | null;
+                    rinf_track_id?: string | null;
+                    streckennummer?: string | null;
+                    match_methode: string;
+                    anmerkungen?: string | null;
+                  }>;
+                };
+                platforms = matching.rows.map((row) => ({
+                  track: row.isr_gleisnummer_betrieb,
+                  platform_height_mm:
+                    row.isr_systemhoehe_cm == null
+                      ? null
+                      : Number(row.isr_systemhoehe_cm) * 10,
+                  net_construction_length_m:
+                    row.isr_bahnsteignutzlaenge_m == null
+                      ? null
+                      : Number(row.isr_bahnsteignutzlaenge_m),
+                  usable_length_m:
+                    row.isr_bahnsteignutzlaenge_m == null
+                      ? null
+                      : Number(row.isr_bahnsteignutzlaenge_m),
+                  rinf_platform_id: row.rinf_platform_id,
+                  rinf_track_id: row.rinf_track_id,
+                  rinf_line_number: row.streckennummer,
+                  mapping_method: row.match_methode,
+                  mapping_confidence: row.rinf_platform_id
+                    ? row.match_methode.includes('mehrdeutig')
+                      ? 'ambiguous'
+                      : 'confirmed'
+                    : 'unmatched',
+                  mapping_evidence: [
+                    'DB ISR GLEISNUMMER__BETRIEB',
+                    ...(row.rinf_platform_id
+                      ? ['ERA RINF platformId/trackId']
+                      : []),
+                    ...(row.anmerkungen ? [row.anmerkungen] : []),
+                  ],
+                }));
+                data.status.db_infrago = 'active';
+                data.status.era_rinf = platforms.some(
+                  (item) => item.rinf_platform_id,
+                )
+                  ? 'active'
+                  : 'not_found';
+              }
+            }
             if (platforms.some((item) => item.usable_length_m != null))
               localStorage.setItem(
                 `station-platform-reference:${station.id}`,
