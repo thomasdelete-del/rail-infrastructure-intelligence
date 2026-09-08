@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import UTC, date, datetime
 import httpx
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +25,8 @@ from app.services.osm_platforms import load_osm_platforms
 from app.services.platform_matching import fetch_station_data, load_matching_statistics, sync_all_stations
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
+_matching_sync_task: asyncio.Task | None = None
+_matching_sync_status: dict = {"status": "pending", "started_at": None, "completed_at": None, "error": None}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -47,6 +49,28 @@ def health(): return {"status": "ok"}
 def health_database(): return {"status": "ok" if database_health() else "error"}
 
 
+async def _run_matching_sync() -> None:
+    _matching_sync_status.update(status="running", started_at=datetime.now(UTC), completed_at=None, error=None)
+    try:
+        result = await sync_all_stations(25)
+        _matching_sync_status.update(status="completed", completed_at=datetime.now(UTC), result=result)
+    except Exception as error:
+        _matching_sync_status.update(status="failed", completed_at=datetime.now(UTC), error=str(error))
+
+
+def _start_matching_sync() -> bool:
+    global _matching_sync_task
+    if _matching_sync_task is not None and not _matching_sync_task.done():
+        return False
+    _matching_sync_task = asyncio.create_task(_run_matching_sync())
+    return True
+
+
+@app.on_event("startup")
+async def start_isr_background_sync():
+    _start_matching_sync()
+
+
 @app.get("/matching/stations/fetch")
 async def matching_fetch_station(rl100: str | None = None, stel_id: str | None = None):
     try:
@@ -61,13 +85,14 @@ async def matching_fetch_station(rl100: str | None = None, stel_id: str | None =
 
 @app.post("/matching/stations/sync")
 async def matching_sync_all(concurrency: int = Query(default=75, ge=1, le=100)):
-    return await sync_all_stations(concurrency)
+    started = _start_matching_sync()
+    return {"started": started, "sync": _matching_sync_status}
 
 
 @app.get("/matching/statistics")
 def matching_statistics():
     try:
-        return load_matching_statistics()
+        return {**load_matching_statistics(), "sync": _matching_sync_status}
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 

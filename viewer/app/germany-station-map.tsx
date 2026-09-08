@@ -93,6 +93,12 @@ type ServerStatistics = {
   platform_rows: number;
   last_checked_at?: string | null;
   complete_definition: string;
+  sync?: {
+    status: 'pending' | 'running' | 'completed' | 'failed';
+    started_at?: string | null;
+    completed_at?: string | null;
+    error?: string | null;
+  };
 };
 type InventoryObservation = {
   attribute: string;
@@ -290,14 +296,33 @@ export function SelectedStationMap({
     station.longitude >= 7.77 &&
     station.longitude <= 10.24;
   useEffect(() => {
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setStatisticsLoading(true);
-    void fetch(`${API}/matching/statistics`, { cache: 'no-store' })
-      .then((response) =>
-        response.ok ? response.json() : Promise.reject(new Error()),
-      )
-      .then((statistics) => setServerStatistics(statistics as ServerStatistics))
-      .catch(() => setServerStatistics(null))
-      .finally(() => setStatisticsLoading(false));
+    const loadStatistics = () => {
+      void fetch(`${API}/matching/statistics`, { cache: 'no-store' })
+        .then((response) =>
+          response.ok ? response.json() : Promise.reject(new Error()),
+        )
+        .then((statistics) => {
+          if (disposed) return;
+          const value = statistics as ServerStatistics;
+          setServerStatistics(value);
+          if (value.sync?.status === 'running')
+            timer = setTimeout(loadStatistics, 10000);
+        })
+        .catch(() => {
+          if (!disposed) setServerStatistics(null);
+        })
+        .finally(() => {
+          if (!disposed) setStatisticsLoading(false);
+        });
+    };
+    loadStatistics();
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [refreshNonce]);
   useEffect(() => {
     try {
@@ -2786,6 +2811,30 @@ export function SelectedStationMap({
           </span>
         ) : serverStatistics ? (
           <>
+            <div
+              className={`sync-status sync-status-${serverStatistics.sync?.status ?? 'pending'}`}
+            >
+              {serverStatistics.sync?.status === 'running' ? (
+                <LoaderCircle size={17} aria-hidden="true" />
+              ) : null}
+              <strong>
+                {serverStatistics.sync?.status === 'running'
+                  ? 'ISR-Synchronisierung läuft im Hintergrund'
+                  : serverStatistics.sync?.status === 'completed'
+                    ? 'ISR-Synchronisierung abgeschlossen'
+                    : serverStatistics.sync?.status === 'failed'
+                      ? 'ISR-Synchronisierung unterbrochen'
+                      : 'ISR-Synchronisierung wird vorbereitet'}
+              </strong>
+              {serverStatistics.sync?.started_at ? (
+                <span>
+                  Start:{' '}
+                  {new Date(serverStatistics.sync.started_at).toLocaleString(
+                    'de-DE',
+                  )}
+                </span>
+              ) : null}
+            </div>
             <div className="server-statistics-grid">
               <div>
                 <strong>

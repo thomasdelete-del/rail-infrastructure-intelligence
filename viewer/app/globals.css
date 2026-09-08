@@ -2203,6 +2203,27 @@ a:focus-visible {
   color: #526873;
   font-size: 0.78rem;
 }
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 7px;
+  background: #eef6f8;
+  padding: 9px 11px;
+  color: #17465d;
+}
+.sync-status span {
+  margin-left: auto;
+  color: #607783;
+  font-size: 0.78rem;
+}
+.sync-status-running svg {
+  animation: field-loading-spin 0.9s linear infinite;
+}
+.sync-status-failed {
+  background: #fff0ed;
+  color: #9b2c23;
+}
 .endpoint-review-nav > button {
   width: 42px;
   border: 0;
