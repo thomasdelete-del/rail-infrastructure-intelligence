@@ -98,6 +98,14 @@ type ServerStatistics = {
     started_at?: string | null;
     completed_at?: string | null;
     error?: string | null;
+    sources?: Record<
+      'db_infrago' | 'isr' | 'osm',
+      {
+        status: 'pending' | 'running' | 'completed' | 'failed';
+        records?: number;
+        error?: string | null;
+      }
+    >;
   };
 };
 type InventoryObservation = {
@@ -2834,6 +2842,41 @@ export function SelectedStationMap({
                   )}
                 </span>
               ) : null}
+            </div>
+            <div className="source-sync-grid" aria-label="Hintergrundimporte">
+              {(
+                [
+                  ['db_infrago', 'DB InfraGO Stationsdaten'],
+                  ['isr', 'ISR-Bahnsteigdaten'],
+                  ['osm', 'OSM-Zuordnungsdaten'],
+                ] as const
+              ).map(([key, label]) => {
+                const source = serverStatistics.sync?.sources?.[key];
+                return (
+                  <div
+                    key={key}
+                    className={`source-sync source-sync-${source?.status ?? 'pending'}`}
+                  >
+                    {source?.status === 'running' ? (
+                      <LoaderCircle size={16} aria-hidden="true" />
+                    ) : (
+                      <span className="source-sync-dot" aria-hidden="true" />
+                    )}
+                    <span>
+                      <strong>{label}</strong>
+                      <small>
+                        {source?.status === 'running'
+                          ? 'Wird im Hintergrund geladen …'
+                          : source?.status === 'completed'
+                            ? `${(source.records ?? 0).toLocaleString('de-DE')} Datensätze verarbeitet`
+                            : source?.status === 'failed'
+                              ? 'Laden fehlgeschlagen'
+                              : 'Wartet auf Verarbeitung'}
+                      </small>
+                    </span>
+                  </div>
+                );
+              })}
             </div>
             <div className="server-statistics-grid">
               <div>

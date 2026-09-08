@@ -2224,6 +2224,49 @@ a:focus-visible {
   background: #fff0ed;
   color: #9b2c23;
 }
+.source-sync-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.source-sync {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d4e0e5;
+  border-radius: 7px;
+  padding: 9px 10px;
+}
+.source-sync > span:not(.source-sync-dot) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+.source-sync small {
+  color: #607783;
+}
+.source-sync-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #9aabb3;
+}
+.source-sync-completed .source-sync-dot {
+  background: #20845a;
+}
+.source-sync-failed .source-sync-dot {
+  background: #d54532;
+}
+.source-sync-running svg {
+  animation: field-loading-spin 0.9s linear infinite;
+  color: #0b7895;
+}
+@media (max-width: 720px) {
+  .source-sync-grid {
+    grid-template-columns: 1fr;
+  }
+}
 .endpoint-review-nav > button {
   width: 42px;
   border: 0;

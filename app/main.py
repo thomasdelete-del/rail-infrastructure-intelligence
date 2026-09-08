@@ -26,7 +26,14 @@ from app.services.platform_matching import fetch_station_data, load_matching_sta
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
 _matching_sync_task: asyncio.Task | None = None
-_matching_sync_status: dict = {"status": "pending", "started_at": None, "completed_at": None, "error": None}
+_matching_sync_status: dict = {
+    "status": "pending", "started_at": None, "completed_at": None, "error": None,
+    "sources": {
+        "db_infrago": {"status": "pending", "records": 0},
+        "isr": {"status": "pending", "records": 0},
+        "osm": {"status": "pending", "records": 0},
+    },
+}
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -50,11 +57,24 @@ def health_database(): return {"status": "ok" if database_health() else "error"}
 
 
 async def _run_matching_sync() -> None:
+    sources = _matching_sync_status["sources"]
+    for source in sources.values():
+        source.update(status="pending", records=0, error=None)
     _matching_sync_status.update(status="running", started_at=datetime.now(UTC), completed_at=None, error=None)
     try:
+        sources["db_infrago"]["status"] = "running"
+        stations = await stada_station_list()
+        sources["db_infrago"].update(status="completed", records=len(stations))
+        sources["isr"]["status"] = "running"
+        sources["osm"]["status"] = "running"
         result = await sync_all_stations(25)
+        sources["isr"].update(status="completed", records=result.get("rows", 0))
+        sources["osm"].update(status="completed", records=result.get("stations", 0))
         _matching_sync_status.update(status="completed", completed_at=datetime.now(UTC), result=result)
     except Exception as error:
+        for source in sources.values():
+            if source["status"] == "running":
+                source.update(status="failed", error=str(error))
         _matching_sync_status.update(status="failed", completed_at=datetime.now(UTC), error=str(error))
 
 
