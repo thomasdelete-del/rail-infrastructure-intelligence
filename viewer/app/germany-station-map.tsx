@@ -722,6 +722,7 @@ export function SelectedStationMap({
         const platforms = mergeMatchingPlatforms([], matching);
         setIsrIdentifierMatch(matching.identifier_match ?? null);
         setAuthoritativePlatforms(platforms);
+        setPlatformDataLoading(false);
         localStorage.setItem(
           `station-platform-materialized:${station.id}`,
           JSON.stringify({
@@ -752,7 +753,7 @@ export function SelectedStationMap({
       localPlatformSnapshot = undefined;
     setAuthoritativePlatforms(localPlatformSnapshot?.platforms ?? []);
     setIsrIdentifierMatch(localPlatformSnapshot?.identifierMatch ?? null);
-    setPlatformDataLoading(true);
+    setPlatformDataLoading(!localPlatformSnapshot?.platforms.length);
     setInventory(null);
     setSelectedObjectKey(null);
     setAerialResults({});

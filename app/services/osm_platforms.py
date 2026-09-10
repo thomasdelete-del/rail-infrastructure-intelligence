@@ -88,25 +88,39 @@ def _store_platforms(rl100: str, elements: list[dict[str, Any]]) -> None:
 async def _refresh_osm_platforms(latitude: float, longitude: float, rl100: str | None) -> dict[str, Any]:
     errors: list[str] = []
     cache_key = (round(latitude, 3), round(longitude, 3))
-    async with httpx.AsyncClient(timeout=35, follow_redirects=True) as client:
-        for endpoint in OVERPASS_ENDPOINTS:
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        async def fetch_endpoint(endpoint: str) -> tuple[str, list[dict[str, Any]], str | None]:
             try:
                 response = await client.post(
                     endpoint,
                     data={"data": platform_query(latitude, longitude)},
-                    headers={"User-Agent": "rail-infrastructure-intelligence/1.4"},
+                    headers={"User-Agent": "rail-infrastructure-intelligence/1.5"},
                 )
                 response.raise_for_status()
                 elements = filter_rail_objects(response.json().get("elements", []))
+                return endpoint, elements, None if elements else "empty"
+            except (httpx.HTTPError, ValueError) as error:
+                return endpoint, [], type(error).__name__
+
+        tasks = [asyncio.create_task(fetch_endpoint(endpoint)) for endpoint in OVERPASS_ENDPOINTS]
+        try:
+            for completed in asyncio.as_completed(tasks):
+                endpoint, elements, error = await completed
                 if elements:
+                    for task in tasks:
+                        if not task.done():
+                            task.cancel()
                     result = {"source": endpoint, "fallback_used": endpoint != OVERPASS_ENDPOINTS[0], "cache_used": False, "elements": elements}
                     _OSM_PLATFORM_CACHE[cache_key] = result
                     if rl100:
                         _store_platforms(rl100, elements)
                     return result
-                errors.append(f"{endpoint}:empty")
-            except (httpx.HTTPError, ValueError) as error:
-                errors.append(f"{endpoint}:{type(error).__name__}")
+                errors.append(f"{endpoint}:{error}")
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
     cached = _OSM_PLATFORM_CACHE.get(cache_key)
     if cached:
         return {**cached, "source": "last-successful-overpass-response", "fallback_used": True, "cache_used": True, "errors": errors}
