@@ -22,6 +22,7 @@ from app.services.station_identity import netex_xml, prioritize_station_identity
 from app.services.dynamic_station_sources import collect_db_station_sources
 from app.services.platform_data import load_platform_data
 from app.services.osm_platforms import load_osm_platforms
+from app.services.official_imagery import find_official_imagery
 from app.services.platform_matching import fetch_station_data, load_matching_statistics, sync_all_stations, sync_osm_station_identities
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
@@ -252,6 +253,14 @@ async def station_platform_data(name: str = Query(min_length=2, max_length=160),
 @app.get("/stations/osm-platforms")
 async def station_osm_platforms(latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16), rl100: str | None = Query(default=None, min_length=2, max_length=12)):
     return await load_osm_platforms(latitude, longitude, rl100)
+
+
+@app.get("/stations/official-imagery")
+async def station_official_imagery(latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
+    try:
+        return await find_official_imagery(latitude, longitude)
+    except httpx.HTTPError as error:
+        raise HTTPException(status_code=502, detail="Bundesland konnte nicht ermittelt werden") from error
 
 
 @app.get("/stations/infrastructure")

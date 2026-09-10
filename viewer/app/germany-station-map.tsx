@@ -273,6 +273,15 @@ const platformLongAxis = (geometry: Array<{ lat: number; lon: number }>) => {
   );
   return axis;
 };
+type OfficialImageryConfig = {
+  state?: string | null;
+  available: boolean;
+  service?: {
+    url: string;
+    layers: string;
+    attribution: string;
+  } | null;
+};
 
 export function SelectedStationMap({
   station,
@@ -345,6 +354,8 @@ export function SelectedStationMap({
   const [officialImageryStatus, setOfficialImageryStatus] = useState<
     'loading' | 'active' | 'unavailable'
   >('loading');
+  const [officialImageryConfig, setOfficialImageryConfig] =
+    useState<OfficialImageryConfig | null>(null);
   const [sourceUpdated, setSourceUpdated] = useState<Record<string, Date>>({});
   const [databaseFreshness, setDatabaseFreshness] = useState<{
     lastUpdate?: string;
@@ -388,11 +399,35 @@ export function SelectedStationMap({
   const displayName = /bahnhof$/i.test(authoritativeName.trim())
     ? authoritativeName
     : `${authoritativeName} Bahnhof`;
-  const officialImageryAvailable =
-    station.latitude >= 49.39 &&
-    station.latitude <= 51.66 &&
-    station.longitude >= 7.77 &&
-    station.longitude <= 10.24;
+  const officialImageryAvailable = Boolean(
+    officialImageryConfig?.available && officialImageryConfig.service,
+  );
+  useEffect(() => {
+    const controller = new AbortController();
+    setOfficialImageryConfig(null);
+    setOfficialImageryStatus('loading');
+    const parameters = new URLSearchParams({
+      latitude: String(station.latitude),
+      longitude: String(station.longitude),
+    });
+    void fetch(`${API}/stations/official-imagery?${parameters}`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    })
+      .then((response) =>
+        response.ok ? response.json() : Promise.reject(new Error()),
+      )
+      .then((raw: unknown) => {
+        const config = raw as OfficialImageryConfig;
+        setOfficialImageryConfig(config);
+        if (!config.available) setOfficialImageryStatus('unavailable');
+      })
+      .catch((error: Error) => {
+        if (error.name !== 'AbortError')
+          setOfficialImageryStatus('unavailable');
+      });
+    return () => controller.abort();
+  }, [station]);
   useEffect(() => {
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1065,18 +1100,17 @@ export function SelectedStationMap({
             current === 'active' ? current : 'unavailable',
           );
       });
-      if (officialImageryAvailable) {
+      if (officialImageryAvailable && officialImageryConfig?.service) {
         officialRef.current = L.tileLayer.wms(
-          'https://www.gds-srv.hessen.de/cgi-bin/lika-services/ogc-free-images.ows',
+          officialImageryConfig.service.url,
           {
-            layers: 'he_dop20_rgb',
+            layers: officialImageryConfig.service.layers,
             format: 'image/png',
             transparent: true,
             version: '1.1.1',
             maxZoom: 24,
             opacity: 0,
-            attribution:
-              'Luftbild: &copy; Hessische Verwaltung für Bodenmanagement und Geoinformation · DL-DE Zero-2.0',
+            attribution: `Luftbild: ${officialImageryConfig.service.attribution}`,
           },
         );
         officialRef.current.on('load', () => {
@@ -1413,6 +1447,7 @@ export function SelectedStationMap({
     correctedGeometries,
     displayName,
     officialImageryAvailable,
+    officialImageryConfig,
     refreshNonce,
     station,
     identity?.ril,
@@ -2324,7 +2359,12 @@ export function SelectedStationMap({
               }
             >
               <Layers3 size={16} />
-              <span>Amtliches Luftbild</span>
+              <span>
+                Amtliches Luftbild
+                {officialImageryConfig?.state
+                  ? ` · ${officialImageryConfig.state}`
+                  : ''}
+              </span>
             </button>
           ) : null}
           {imagery !== 'none' ? (
