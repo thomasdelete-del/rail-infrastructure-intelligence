@@ -128,11 +128,9 @@ const mergeMatchingPlatforms = (
       isr_operating_track: row.isr_gleisnummer_betrieb,
       isr_public_track: publicTrack || null,
       platform_height_mm:
-        row.db_platform_height_mm ??
-        existing?.platform_height_mm ??
-        (row.isr_systemhoehe_cm == null
+        row.isr_systemhoehe_cm == null
           ? null
-          : Number(row.isr_systemhoehe_cm) * 10),
+          : Number(row.isr_systemhoehe_cm) * 10,
       net_construction_length_m:
         row.db_net_construction_length_m ??
         existing?.net_construction_length_m ??
@@ -689,16 +687,67 @@ export function SelectedStationMap({
     }
   };
   useEffect(() => {
+    const stationNumber = station.id.match(/^stada-(\d+)$/)?.[1];
+    if (!stationNumber) return;
+    const controller = new AbortController();
+    void fetch(
+      `${API}/stations/materialized-identity?${new URLSearchParams({ station_number: stationNumber })}`,
+      { cache: 'no-store', signal: controller.signal },
+    )
+      .then((response) =>
+        response.ok ? response.json() : Promise.reject(new Error()),
+      )
+      .then(async (raw: unknown) => {
+        const value = raw as {
+          matched_name?: string;
+          eva?: string;
+          ril?: string;
+          station_number?: string;
+        };
+        setIdentity({
+          name: value.matched_name,
+          eva: value.eva,
+          ril: value.ril,
+          stationNumber: value.station_number,
+        });
+        if (!value.ril) return;
+        const response = await fetch(
+          `${API}/matching/stations/fetch?${new URLSearchParams({ rl100: value.ril })}`,
+          { cache: 'no-store', signal: controller.signal },
+        );
+        if (!response.ok) return;
+        const matching = (await response.json()) as MatchingPayload;
+        const platforms = mergeMatchingPlatforms([], matching);
+        setIsrIdentifierMatch(matching.identifier_match ?? null);
+        setAuthoritativePlatforms(platforms);
+        localStorage.setItem(
+          `station-platform-materialized:${station.id}`,
+          JSON.stringify({
+            sourceModel: 'isr-height-v1',
+            dataVersion: matching.data_version,
+            platforms,
+            identifierMatch: matching.identifier_match,
+          }),
+        );
+      })
+      .catch((error: Error) => {
+        if (error.name !== 'AbortError') return;
+      });
+    return () => controller.abort();
+  }, [station, refreshNonce]);
+  useEffect(() => {
     setIdentity(null);
     setDbSources({});
     let localPlatformSnapshot:
-      | { dataVersion?: string | null; platforms: AuthoritativePlatform[]; identifierMatch?: MatchingPayload['identifier_match'] }
+      | { sourceModel?: string; dataVersion?: string | null; platforms: AuthoritativePlatform[]; identifierMatch?: MatchingPayload['identifier_match'] }
       | undefined;
     try {
       localPlatformSnapshot = JSON.parse(
         localStorage.getItem(`station-platform-materialized:${station.id}`) || 'null',
       ) as typeof localPlatformSnapshot;
     } catch {}
+    if (localPlatformSnapshot?.sourceModel !== 'isr-height-v1')
+      localPlatformSnapshot = undefined;
     setAuthoritativePlatforms(localPlatformSnapshot?.platforms ?? []);
     setIsrIdentifierMatch(localPlatformSnapshot?.identifierMatch ?? null);
     setPlatformDataLoading(true);
@@ -789,6 +838,7 @@ export function SelectedStationMap({
               setIsrIdentifierMatch(matching.identifier_match ?? null);
               setAuthoritativePlatforms(cachedPlatforms);
               localPlatformSnapshot = {
+                sourceModel: 'isr-height-v1',
                 dataVersion: matching.data_version,
                 platforms: cachedPlatforms,
                 identifierMatch: matching.identifier_match,
@@ -831,6 +881,7 @@ export function SelectedStationMap({
                 platforms = mergeMatchingPlatforms([], refreshedMatching);
                 setIsrIdentifierMatch(refreshedMatching.identifier_match ?? null);
                 localPlatformSnapshot = {
+                  sourceModel: 'isr-height-v1',
                   dataVersion: refreshedMatching.data_version,
                   platforms,
                   identifierMatch: refreshedMatching.identifier_match,
@@ -897,7 +948,6 @@ export function SelectedStationMap({
       .then(() => setLastUpdated(new Date()))
       .catch((error: Error) => {
         if (error.name !== 'AbortError') {
-          setIdentity(null);
           setDbSources({
             stada: 'unavailable',
             netex: 'unavailable',
@@ -2723,24 +2773,19 @@ export function SelectedStationMap({
                   </td>
                   <td>
                     {platformDataLoading &&
-                    data?.platform_height_mm == null &&
-                    !edge?.height ? (
+                    data?.platform_height_mm == null ? (
                       loadingField('Bahnsteighöhe')
                     ) : (
                       <div className="data-value">
                       <strong>
                         {data?.platform_height_mm != null
                           ? `${data.platform_height_mm} mm`
-                          : edge?.height
-                            ? `${Number(edge.height) * 1000} mm`
-                            : 'Nicht geliefert'}
+                          : 'Nicht geliefert'}
                       </strong>
                       <span>
                         {data?.platform_height_mm != null
-                          ? 'DB InfraGO'
-                          : edge?.height
-                            ? 'OpenStreetMap · Ersatzwert'
-                            : 'DB InfraGO · nicht geliefert'}
+                          ? 'DB ISR'
+                          : 'DB ISR · nicht geliefert'}
                       </span>
                       </div>
                     )}

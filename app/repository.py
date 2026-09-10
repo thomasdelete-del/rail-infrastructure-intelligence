@@ -19,6 +19,18 @@ def load_station_locations() -> list[dict[str, Any]]:
         return [dict(row) for row in connection.execute(sql).mappings()]
 
 
+def load_station_location(station_number: int) -> dict[str, Any] | None:
+    """Read one station identity from the Railway snapshot without external I/O."""
+    sql = text('''
+        SELECT station_number, name, eva, ril, latitude, longitude, stored_at
+        FROM station_location_snapshot
+        WHERE station_number = :station_number
+    ''')
+    with get_engine().connect() as connection:
+        row = connection.execute(sql, {"station_number": station_number}).mappings().first()
+        return dict(row) if row else None
+
+
 def store_station_locations_once(stations: list[dict[str, Any]]) -> int:
     """Materialize StaDa locations once; existing station rows remain unchanged."""
     if not stations:

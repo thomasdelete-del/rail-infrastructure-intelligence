@@ -10,7 +10,7 @@ from app.collectors.stada import StaDaCollector
 from app.collectors.fasta import FaStaCollector
 from app.collectors.rinf import RINFCollector
 from app.database import database_health
-from app.repository import load_infrastructure_inventory, load_source_freshness, load_station_locations, summarize_infrastructure_inventory
+from app.repository import load_infrastructure_inventory, load_source_freshness, load_station_location, load_station_locations, summarize_infrastructure_inventory
 from app.seed.friedberg import FRIEDBERG
 from app.seed.friedberg_geometry import FRIEDBERG_GEOMETRY
 from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SOURCES
@@ -194,6 +194,27 @@ async def stations_stada_list():
         raise HTTPException(status_code=503, detail=str(error)) from error
     except httpx.HTTPError as error:
         raise HTTPException(status_code=502, detail="StaDa station list is temporarily unavailable") from error
+
+
+@app.get("/stations/materialized-identity")
+def station_materialized_identity(station_number: int = Query(ge=1)):
+    """Return the Railway-hosted station key immediately, without live source checks."""
+    try:
+        station = load_station_location(station_number)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    if station is None:
+        raise HTTPException(status_code=404, detail="Station is not present in the Railway snapshot")
+    return {
+        "matched_name": station["name"],
+        "station_number": str(station["station_number"]),
+        "eva": str(station["eva"]) if station.get("eva") is not None else None,
+        "ril": station.get("ril"),
+        "latitude": station.get("latitude"),
+        "longitude": station.get("longitude"),
+        "stored_at": station.get("stored_at"),
+        "storage": "Railway PostgreSQL snapshot",
+    }
 
 @app.get("/stations/dynamic-sources")
 async def dynamic_sources(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
