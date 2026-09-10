@@ -1116,15 +1116,43 @@ export function SelectedStationMap({
           longitude: String(station.longitude),
         });
         if (identity?.ril) parameters.set('rl100', identity.ril);
-        const response = await fetch(
+        let localOsmElements: OsmElement[] = [];
+        try {
+          localOsmElements = JSON.parse(
+            localStorage.getItem(`station-osm-reference:${station.id}`) || '[]',
+          ) as OsmElement[];
+        } catch {}
+        const osmRequest = fetch(
           `${API}/stations/osm-platforms?${parameters}`,
           { cache: 'no-store' },
         );
-        if (!response.ok) throw new Error();
-        const data = (await response.json()) as {
+        let data: {
           elements: OsmElement[];
           cache_used?: boolean;
         };
+        if (localOsmElements.length) {
+          data = { elements: localOsmElements, cache_used: true };
+          void osmRequest
+            .then(async (response) => {
+              if (!response.ok) return;
+              const refreshed = (await response.json()) as {
+                elements?: OsmElement[];
+              };
+              if (refreshed.elements?.length)
+                localStorage.setItem(
+                  `station-osm-reference:${station.id}`,
+                  JSON.stringify(refreshed.elements),
+                );
+            })
+            .catch(() => undefined);
+        } else {
+          const response = await osmRequest;
+          if (!response.ok) throw new Error();
+          data = (await response.json()) as {
+            elements: OsmElement[];
+            cache_used?: boolean;
+          };
+        }
         const isFriedbergPilot =
           identity?.stationNumber === '1930' ||
           /^Friedberg \(Hess\)/i.test(authoritativeName);
