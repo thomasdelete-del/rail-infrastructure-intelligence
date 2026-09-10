@@ -88,12 +88,12 @@ def _store_platforms(rl100: str, elements: list[dict[str, Any]]) -> None:
 async def _refresh_osm_platforms(latitude: float, longitude: float, rl100: str | None) -> dict[str, Any]:
     errors: list[str] = []
     cache_key = (round(latitude, 3), round(longitude, 3))
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=45, follow_redirects=True) as client:
         async def fetch_endpoint(endpoint: str) -> tuple[str, list[dict[str, Any]], str | None]:
             try:
-                response = await client.post(
+                response = await client.get(
                     endpoint,
-                    data={"data": platform_query(latitude, longitude)},
+                    params={"data": platform_query(latitude, longitude)},
                     headers={"User-Agent": "rail-infrastructure-intelligence/1.5"},
                 )
                 response.raise_for_status()
