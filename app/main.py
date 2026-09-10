@@ -229,8 +229,8 @@ async def station_platform_data(name: str = Query(min_length=2, max_length=160),
 
 
 @app.get("/stations/osm-platforms")
-async def station_osm_platforms(latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
-    return await load_osm_platforms(latitude, longitude)
+async def station_osm_platforms(latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16), rl100: str | None = Query(default=None, min_length=2, max_length=12)):
+    return await load_osm_platforms(latitude, longitude, rl100)
 
 
 @app.get("/stations/infrastructure")

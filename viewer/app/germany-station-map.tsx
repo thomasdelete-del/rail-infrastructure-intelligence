@@ -85,6 +85,74 @@ type AuthoritativePlatform = {
   mapping_score?: number | null;
   mapping_evidence?: string[] | null;
 };
+type MatchingPayload = {
+  data_version?: string | null;
+  identifier_match?: {
+    requested: string;
+    matched: string;
+    difference: string;
+  } | null;
+  rows: Array<{
+    isr_gleisnummer_betrieb: string;
+    isr_gleisnummer_verkehr?: string | null;
+    isr_systemhoehe_cm?: number | null;
+    isr_bahnsteignutzlaenge_m?: number | null;
+    db_platform_height_mm?: number | null;
+    db_net_construction_length_m?: number | null;
+    rinf_platform_id?: string | null;
+    rinf_track_id?: string | null;
+    streckennummer?: string | null;
+    match_methode: string;
+    anmerkungen?: string | null;
+  }>;
+};
+
+const mergeMatchingPlatforms = (
+  base: AuthoritativePlatform[],
+  matching: MatchingPayload,
+): AuthoritativePlatform[] =>
+  matching.rows.map((row) => {
+    const publicTrack = row.isr_gleisnummer_verkehr?.trim();
+    const existing =
+      base.find(
+        (item) =>
+          Boolean(publicTrack) &&
+          normalizeTrackRef(item.track) === normalizeTrackRef(publicTrack!),
+      ) ??
+      (base.length === 1 && matching.rows.length === 1 ? base[0] : undefined);
+    const displayTrack =
+      publicTrack || existing?.track || row.isr_gleisnummer_betrieb;
+    return {
+      ...existing,
+      track: displayTrack,
+      isr_operating_track: row.isr_gleisnummer_betrieb,
+      isr_public_track: publicTrack || null,
+      platform_height_mm:
+        row.db_platform_height_mm ??
+        existing?.platform_height_mm ??
+        (row.isr_systemhoehe_cm == null
+          ? null
+          : Number(row.isr_systemhoehe_cm) * 10),
+      net_construction_length_m:
+        row.db_net_construction_length_m ??
+        existing?.net_construction_length_m ??
+        null,
+      usable_length_m:
+        row.isr_bahnsteignutzlaenge_m == null
+          ? null
+          : Number(row.isr_bahnsteignutzlaenge_m),
+      rinf_platform_id: row.rinf_platform_id,
+      rinf_track_id: row.rinf_track_id,
+      rinf_line_number: row.streckennummer,
+      mapping_method: row.match_methode,
+      mapping_confidence: row.rinf_platform_id ? 'confirmed' : 'unmatched',
+      mapping_evidence: [
+        'DB ISR GLEISNUMMER__BETRIEB',
+        ...(row.rinf_platform_id ? ['ERA RINF platformId/trackId'] : []),
+        ...(row.anmerkungen ? [row.anmerkungen] : []),
+      ],
+    };
+  });
 type ServerStatistics = {
   total_stations: number;
   cached_isr_stations: number;
@@ -623,8 +691,16 @@ export function SelectedStationMap({
   useEffect(() => {
     setIdentity(null);
     setDbSources({});
-    setAuthoritativePlatforms([]);
-    setIsrIdentifierMatch(null);
+    let localPlatformSnapshot:
+      | { dataVersion?: string | null; platforms: AuthoritativePlatform[]; identifierMatch?: MatchingPayload['identifier_match'] }
+      | undefined;
+    try {
+      localPlatformSnapshot = JSON.parse(
+        localStorage.getItem(`station-platform-materialized:${station.id}`) || 'null',
+      ) as typeof localPlatformSnapshot;
+    } catch {}
+    setAuthoritativePlatforms(localPlatformSnapshot?.platforms ?? []);
+    setIsrIdentifierMatch(localPlatformSnapshot?.identifierMatch ?? null);
     setPlatformDataLoading(true);
     setInventory(null);
     setSelectedObjectKey(null);
@@ -694,6 +770,35 @@ export function SelectedStationMap({
             name: value.matched_name || station.name,
             ril: value.ril,
           });
+          const matchingResponse = await fetch(
+            `${API}/matching/stations/fetch?${new URLSearchParams({ rl100: value.ril })}`,
+            { cache: 'no-store', signal: controller.signal },
+          );
+          const matching = matchingResponse.ok
+            ? ((await matchingResponse.json()) as MatchingPayload)
+            : null;
+          if (matching) {
+            const cachedVersion = localPlatformSnapshot?.dataVersion;
+            if (
+              !localPlatformSnapshot ||
+              !cachedVersion ||
+              !matching.data_version ||
+              matching.data_version > cachedVersion
+            ) {
+              const cachedPlatforms = mergeMatchingPlatforms([], matching);
+              setIsrIdentifierMatch(matching.identifier_match ?? null);
+              setAuthoritativePlatforms(cachedPlatforms);
+              localPlatformSnapshot = {
+                dataVersion: matching.data_version,
+                platforms: cachedPlatforms,
+                identifierMatch: matching.identifier_match,
+              };
+              localStorage.setItem(
+                `station-platform-materialized:${station.id}`,
+                JSON.stringify(localPlatformSnapshot),
+              );
+            }
+          }
           const response = await fetch(
             `${API}/stations/platform-data?${platformParameters}`,
             { cache: 'no-store', signal: controller.signal },
@@ -707,76 +812,34 @@ export function SelectedStationMap({
               platforms: AuthoritativePlatform[];
               status: { db_infrago?: string; era_rinf?: string };
             };
-            let platforms = data.platforms;
-            const matchingResponse = await fetch(
+            let platforms = localPlatformSnapshot?.platforms ?? [];
+            const refreshedResponse = await fetch(
               `${API}/matching/stations/fetch?${new URLSearchParams({ rl100: value.ril })}`,
               { cache: 'no-store', signal: controller.signal },
             );
-            if (matchingResponse.ok) {
-              const matching = (await matchingResponse.json()) as {
-                identifier_match?: {
-                  requested: string;
-                  matched: string;
-                  difference: string;
-                } | null;
-                rows: Array<{
-                  isr_gleisnummer_betrieb: string;
-                  isr_gleisnummer_verkehr?: string | null;
-                  isr_systemhoehe_cm?: number | null;
-                  isr_bahnsteignutzlaenge_m?: number | null;
-                  rinf_platform_id?: string | null;
-                  rinf_track_id?: string | null;
-                  streckennummer?: string | null;
-                  match_methode: string;
-                  anmerkungen?: string | null;
-                }>;
-              };
-              setIsrIdentifierMatch(matching.identifier_match ?? null);
-              platforms = matching.rows.map((row) => {
-                const publicTrack = row.isr_gleisnummer_verkehr?.trim();
-                const existing = platforms.find(
-                  (item) =>
-                    Boolean(publicTrack) &&
-                    normalizeTrackRef(item.track) ===
-                      normalizeTrackRef(publicTrack!),
-                ) ??
-                  (platforms.length === 1 && matching.rows.length === 1
-                    ? platforms[0]
-                    : undefined);
-                const displayTrack =
-                  publicTrack || existing?.track || row.isr_gleisnummer_betrieb;
-                return {
-                  ...existing,
-                  track: displayTrack,
-                  isr_operating_track: row.isr_gleisnummer_betrieb,
-                  isr_public_track: publicTrack || null,
-                  platform_height_mm:
-                    existing?.platform_height_mm ??
-                    (row.isr_systemhoehe_cm == null
-                      ? null
-                      : Number(row.isr_systemhoehe_cm) * 10),
-                  usable_length_m:
-                    row.isr_bahnsteignutzlaenge_m == null
-                      ? null
-                      : Number(row.isr_bahnsteignutzlaenge_m),
-                  rinf_platform_id: row.rinf_platform_id,
-                  rinf_track_id: row.rinf_track_id,
-                  rinf_line_number: row.streckennummer,
-                  mapping_method: row.match_methode,
-                  mapping_confidence: row.rinf_platform_id
-                    ? row.match_methode.includes('mehrdeutig')
-                      ? 'ambiguous'
-                      : 'confirmed'
-                    : 'unmatched',
-                  mapping_evidence: [
-                    'DB ISR GLEISNUMMER__BETRIEB',
-                    ...(row.rinf_platform_id
-                      ? ['ERA RINF platformId/trackId']
-                      : []),
-                    ...(row.anmerkungen ? [row.anmerkungen] : []),
-                  ],
+            const refreshedMatching = refreshedResponse.ok
+              ? ((await refreshedResponse.json()) as MatchingPayload)
+              : matching;
+            if (refreshedMatching) {
+              const localVersion = localPlatformSnapshot?.dataVersion;
+              if (
+                !localPlatformSnapshot ||
+                !localVersion ||
+                !refreshedMatching.data_version ||
+                refreshedMatching.data_version > localVersion
+              ) {
+                platforms = mergeMatchingPlatforms([], refreshedMatching);
+                setIsrIdentifierMatch(refreshedMatching.identifier_match ?? null);
+                localPlatformSnapshot = {
+                  dataVersion: refreshedMatching.data_version,
+                  platforms,
+                  identifierMatch: refreshedMatching.identifier_match,
                 };
-              });
+                localStorage.setItem(
+                  `station-platform-materialized:${station.id}`,
+                  JSON.stringify(localPlatformSnapshot),
+                );
+              }
               data.status.db_infrago = 'active';
               data.status.era_rinf = platforms.some(
                 (item) => item.rinf_platform_id,
@@ -1000,6 +1063,7 @@ export function SelectedStationMap({
           latitude: String(station.latitude),
           longitude: String(station.longitude),
         });
+        if (identity?.ril) parameters.set('rl100', identity.ril);
         const response = await fetch(
           `${API}/stations/osm-platforms?${parameters}`,
           { cache: 'no-store' },
@@ -1270,6 +1334,7 @@ export function SelectedStationMap({
     officialImageryAvailable,
     refreshNonce,
     station,
+    identity?.ril,
   ]);
   useEffect(() => {
     const opacity = imageryOpacity / 100;
@@ -1955,20 +2020,10 @@ export function SelectedStationMap({
     lengthComparisons.filter((item) => item.level === 'high').length +
     Object.values(aerialResults).filter((item) => item.status === 'high')
       .length;
-  const mappingMethodLabel = (method?: string | null) =>
-    ({
-      exact_platform_id: 'Gleiche Bahnsteigkennung',
-      exact_rinf_track_id: 'Eindeutige RINF-Gleiskennung',
-      unique_line_number: 'Eindeutige Streckennummer',
-      station_crosswalk: 'Bestätigter Stations-Crosswalk',
-      bijective_remainder: 'Eindeutige Restzuordnung',
-      cached_reference: 'Letzter bestätigter Stations-Crosswalk',
-      unmapped: 'Keine belastbare Zuordnung',
-    })[method ?? ''] ?? 'Noch nicht zugeordnet';
-  const mappingResultLabel = (data?: AuthoritativePlatform) =>
-    data?.rinf_platform_id
-      ? `RINF ${data.rinf_platform_id} → DB Gleis ${data.track}`
-      : `DB Gleis ${data?.track ?? '–'} ohne RINF-Zuordnung`;
+  const mappingResultLabel = (data?: AuthoritativePlatform, edge?: PlatformEdge) =>
+    edge
+      ? `DB/ISR Gleis ${data?.track ?? edge.track} ↔ OSM ref=${edge.track}`
+      : `DB/ISR Gleis ${data?.track ?? '–'} ohne OSM-Zuordnung`;
   const stationMasterRows = [
     {
       subject: 'Station',
@@ -3246,7 +3301,9 @@ export function SelectedStationMap({
               </tr>
             </thead>
             <tbody>
-              {platformRows.map(({ track, edge, data }) => (
+              {platformRows.map(({ track, edge, data }) => {
+                const primaryMatched = Boolean(data && edge);
+                return (
                 <tr key={`workflow-${track}`}>
                   <td>
                     <span className="track-pill">Gleis {track}</span>
@@ -3263,7 +3320,7 @@ export function SelectedStationMap({
                     <span>
                       {data?.rinf_platform_id
                         ? `RINF ${data.rinf_platform_id}`
-                        : 'Kein RINF-Kandidat'}
+                        : 'RINF optional · nicht zugeordnet'}
                     </span>
                   </td>
                   <td>
@@ -3272,30 +3329,33 @@ export function SelectedStationMap({
                       <li>Gleis-/Bahnsteigkennung prüfen</li>
                       <li>Räumliche Lage und Längen plausibilisieren</li>
                     </ol>
-                    <strong>{mappingMethodLabel(data?.mapping_method)}</strong>
+                    <strong>
+                      {primaryMatched
+                        ? 'DB/ISR und OSM über Gleisnummer zugeordnet'
+                        : 'Primärzuordnung noch nicht vollständig'}
+                    </strong>
                   </td>
                   <td>
-                    <strong>{mappingResultLabel(data)}</strong>
+                    <strong>{mappingResultLabel(data, edge)}</strong>
                     {data?.mapping_evidence?.length ? (
                       <small>{data.mapping_evidence.join(' · ')}</small>
                     ) : null}
                   </td>
                   <td>
                     <span
-                      className={`matching-status matching-status-${data?.mapping_confidence === 'confirmed' ? 'confirmed' : data?.mapping_confidence === 'derived' ? 'derived' : 'open'}`}
+                      className={`matching-status matching-status-${primaryMatched ? 'confirmed' : 'open'}`}
                     >
-                      {data?.mapping_confidence === 'confirmed'
+                      {primaryMatched
                         ? 'Bestätigt'
-                        : data?.mapping_confidence === 'derived'
-                          ? 'Eindeutig abgeleitet'
-                          : 'Offen'}
+                        : 'Offen'}
                       {data?.mapping_score != null
                         ? ` · ${data.mapping_score} Punkte`
                         : ''}
                     </span>
                   </td>
                 </tr>
-              ))}
+                );
+              })}
               {!loading && !platformRows.length ? (
                 <tr>
                   <td colSpan={5}>

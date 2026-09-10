@@ -10,6 +10,9 @@ import unicodedata
 from urllib.parse import urljoin
 
 import httpx
+from sqlalchemy import text
+
+from app.database import get_engine
 
 from app.collectors.rinf import RINF_ENDPOINT
 
@@ -271,6 +274,30 @@ SELECT DISTINCT ?opLabel ?uopid ?trackId ?lineId ?platform ?platformId ?length W
     for row in rinf_platforms:
         if row["platform_id"] not in used_rinf_ids:
             platforms.append({"track": row["platform_id"], "platform_height_mm": None, "net_construction_length_m": None, "usable_length_m": row["usable_length_m"], "rinf_platform_id": row["platform_id"], "rinf_track_id": row.get("track_id"), "rinf_directional_track_ids": row.get("directional_track_ids", []), "rinf_line_number": row.get("line_number"), "mapping_method": "unmapped", "mapping_confidence": "unresolved"})
+    if platforms:
+        try:
+            with get_engine().begin() as connection:
+                connection.execute(text("""
+                    UPDATE bahnsteige
+                    SET db_platform_height_mm=:height,
+                        db_net_construction_length_m=:net_length,
+                        updated_at=CASE
+                            WHEN db_platform_height_mm IS DISTINCT FROM :height
+                              OR db_net_construction_length_m IS DISTINCT FROM :net_length
+                            THEN now() ELSE updated_at END
+                    WHERE ds100_rl100=:ril
+                      AND COALESCE(NULLIF(isr_gleisnummer_verkehr, ''), isr_gleisnummer_betrieb)=:track
+                """), [
+                    {
+                        "ril": safe_ril,
+                        "track": str(platform["track"]).strip(),
+                        "height": platform.get("platform_height_mm"),
+                        "net_length": platform.get("net_construction_length_m"),
+                    }
+                    for platform in platforms
+                ])
+        except RuntimeError:
+            pass
     return {
         "station": name,
         "ril": safe_ril,

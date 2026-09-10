@@ -1,6 +1,11 @@
+import asyncio
+import json
 from typing import Any
 
 import httpx
+from sqlalchemy import text
+
+from app.database import get_engine
 
 
 OVERPASS_ENDPOINTS = (
@@ -39,7 +44,48 @@ def filter_rail_objects(elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return result
 
 
-async def load_osm_platforms(latitude: float, longitude: float) -> dict[str, Any]:
+def _platform_elements(elements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        element for element in elements
+        if (element.get("tags") or {}).get("railway") in {"platform", "platform_edge"}
+        or (
+            (element.get("tags") or {}).get("public_transport") == "platform"
+            and (element.get("tags") or {}).get("train") == "yes"
+        )
+    ]
+
+
+def _cached_platforms(rl100: str) -> list[dict[str, Any]]:
+    try:
+        with get_engine().connect() as connection:
+            payload = connection.execute(
+                text("SELECT elements FROM osm_bahnsteig_cache WHERE ds100_rl100=:rl100"),
+                {"rl100": rl100},
+            ).scalar()
+    except RuntimeError:
+        return []
+    if isinstance(payload, str):
+        return json.loads(payload)
+    return payload or []
+
+
+def _store_platforms(rl100: str, elements: list[dict[str, Any]]) -> None:
+    platforms = _platform_elements(elements)
+    if not platforms:
+        return
+    try:
+        with get_engine().begin() as connection:
+            connection.execute(text("""
+                INSERT INTO osm_bahnsteig_cache (ds100_rl100, elements, updated_at)
+                VALUES (:rl100, CAST(:elements AS JSONB), now())
+                ON CONFLICT (ds100_rl100) DO UPDATE SET
+                    elements=EXCLUDED.elements, updated_at=now()
+            """), {"rl100": rl100, "elements": json.dumps(platforms)})
+    except RuntimeError:
+        pass
+
+
+async def _refresh_osm_platforms(latitude: float, longitude: float, rl100: str | None) -> dict[str, Any]:
     errors: list[str] = []
     cache_key = (round(latitude, 3), round(longitude, 3))
     async with httpx.AsyncClient(timeout=35, follow_redirects=True) as client:
@@ -55,6 +101,8 @@ async def load_osm_platforms(latitude: float, longitude: float) -> dict[str, Any
                 if elements:
                     result = {"source": endpoint, "fallback_used": endpoint != OVERPASS_ENDPOINTS[0], "cache_used": False, "elements": elements}
                     _OSM_PLATFORM_CACHE[cache_key] = result
+                    if rl100:
+                        _store_platforms(rl100, elements)
                     return result
                 errors.append(f"{endpoint}:empty")
             except (httpx.HTTPError, ValueError) as error:
@@ -63,3 +111,19 @@ async def load_osm_platforms(latitude: float, longitude: float) -> dict[str, Any
     if cached:
         return {**cached, "source": "last-successful-overpass-response", "fallback_used": True, "cache_used": True, "errors": errors}
     return {"source": None, "fallback_used": True, "cache_used": False, "elements": [], "errors": errors}
+
+
+async def load_osm_platforms(latitude: float, longitude: float, rl100: str | None = None) -> dict[str, Any]:
+    normalized_rl100 = rl100.strip().upper() if rl100 else None
+    if normalized_rl100:
+        cached = _cached_platforms(normalized_rl100)
+        if cached:
+            asyncio.create_task(_refresh_osm_platforms(latitude, longitude, normalized_rl100))
+            return {
+                "source": "railway-osm-platform-cache",
+                "fallback_used": False,
+                "cache_used": True,
+                "refresh_running": True,
+                "elements": cached,
+            }
+    return await _refresh_osm_platforms(latitude, longitude, normalized_rl100)

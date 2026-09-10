@@ -326,8 +326,10 @@ def cached_platform_rows(rl100: str) -> list[dict[str, Any]]:
             SELECT eva_nummer, ds100_rl100, bahnhofsname, streckennummer,
                    osm_bahnsteig_ref, isr_gleisnummer_betrieb,
                    isr_gleisnummer_verkehr, isr_systemhoehe_cm,
-                   isr_bahnsteignutzlaenge_m, rinf_uopid, rinf_platform_id,
+                   isr_bahnsteignutzlaenge_m, db_platform_height_mm,
+                   db_net_construction_length_m, rinf_uopid, rinf_platform_id,
                    rinf_track_id, match_methode, anmerkungen
+                   , updated_at
             FROM bahnsteige
             WHERE ds100_rl100=:rl100
             ORDER BY isr_gleisnummer_betrieb
@@ -351,6 +353,10 @@ async def fetch_station_data(rl100: str | None = None, stel_id: str | None = Non
     if station:
         cached_rows = cached_platform_rows(station["BST_RL100"])
         if cached_rows:
+            data_version = max(
+                (row.get("updated_at") for row in cached_rows if row.get("updated_at")),
+                default=None,
+            )
             return {
                 "station": station["BST_RL100"],
                 "rows": cached_rows,
@@ -358,6 +364,7 @@ async def fetch_station_data(rl100: str | None = None, stel_id: str | None = Non
                 "unchanged": len(cached_rows),
                 "source": "Railway PostgreSQL · DB ISR cache",
                 "identifier_match": identifier_match,
+                "data_version": data_version,
             }
 
     year = datetime.now(UTC).year
