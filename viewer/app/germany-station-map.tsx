@@ -3016,8 +3016,8 @@ export function SelectedStationMap({
                         ) : null}
                       </div>
                     ) : (
-                      <span className="data-missing">
-                        Bei DB InfraGO nicht geliefert
+                      <span className="data-missing data-missing-error">
+                        Bei DB InfraGO Stationsausstattung nicht vorhanden
                       </span>
                     )}
                   </td>

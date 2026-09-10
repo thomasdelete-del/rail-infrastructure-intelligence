@@ -1679,6 +1679,11 @@ a:focus-visible {
   font-size: 0.8125rem;
   font-style: italic;
 }
+.data-missing-error {
+  color: #b3261e;
+  font-style: normal;
+  font-weight: 700;
+}
 .data-value {
   display: flex;
   flex-direction: column;
