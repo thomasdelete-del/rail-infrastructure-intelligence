@@ -17,7 +17,7 @@ from app.seed.friedberg_projects import FRIEDBERG_PROJECTS, FRIEDBERG_PROJECT_SO
 from app.seed.friedberg_service_tracks import FRIEDBERG_SERVICE_TRACKS, FRIEDBERG_SERVICE_TRACK_CONFLICTS, SOURCE_2026 as SERVICE_TRACK_SOURCE
 from app.services.change_report import build_change_report
 from app.services.aerial_analysis import analyse_osm_platform
-from app.services.aerial_learning import store_training_sample
+from app.services.aerial_learning import delete_station_endpoint_changes, store_training_sample
 from app.services.station_identity import netex_xml, prioritize_station_identity, resolve_netex_identity as resolve_netex_station_identity, resolve_stada_identity, resolve_station_identity, search_netex_stations, stada_station_list
 from app.services.dynamic_station_sources import collect_db_station_sources
 from app.services.platform_data import load_platform_data
@@ -369,6 +369,10 @@ class AerialTrainingFeedback(BaseModel):
     promote_to_primary: bool = False
 
 
+class StationEndpointChangesDelete(BaseModel):
+    station: str
+
+
 @app.post("/stations/friedberg-hess/aerial-analysis/training-feedback")
 def aerial_training_feedback(feedback: AerialTrainingFeedback):
     if feedback.endpoint not in {"start", "end"}:
@@ -382,6 +386,18 @@ def aerial_training_feedback(feedback: AerialTrainingFeedback):
 @app.post("/stations/aerial-analysis/training-feedback")
 def generic_aerial_training_feedback(feedback: AerialTrainingFeedback):
     return aerial_training_feedback(feedback)
+
+
+@app.post("/stations/aerial-analysis/endpoint-changes/delete")
+def delete_endpoint_changes(request: StationEndpointChangesDelete):
+    station = request.station.strip()
+    if not station:
+        raise HTTPException(status_code=422, detail="station must not be empty")
+    try:
+        deleted = delete_station_endpoint_changes(station)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return {"station": station, "deleted": deleted}
 
 @app.get("/stations/friedberg-hess/change-report/rinf")
 async def rinf_change_report(persist: bool = False):

@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from sqlalchemy import text
 
+from app.database import get_engine
 from app.repository import load_observations, store_observations
 
 SOURCE_KEY = "human-aerial-endpoint-review"
@@ -74,6 +76,36 @@ def latest_correction(track: str, endpoint: str) -> dict[str, float] | None:
         if isinstance(coordinate, dict):
             return {"latitude": float(coordinate["latitude"]), "longitude": float(coordinate["longitude"])}
     return None
+
+
+def delete_station_endpoint_changes(station: str) -> int:
+    """Delete only manually changed endpoints for one station from Railway."""
+    statement = text('''
+        DELETE FROM observation AS o
+        USING source AS s
+        WHERE o.source_id = s.id
+          AND s.source_key = :source_key
+          AND (
+            (
+              o.attribute = :training_attribute
+              AND o.value_json ->> 'track' LIKE :track_prefix
+              AND o.value_json -> 'corrected_coordinate' IS NOT NULL
+              AND o.value_json -> 'corrected_coordinate' <> 'null'::jsonb
+            )
+            OR (
+              o.attribute IN ('primary_start_coordinates', 'primary_end_coordinates')
+              AND o.provenance ->> 'station' = :station
+            )
+          )
+    ''')
+    with get_engine().begin() as connection:
+        result = connection.execute(statement, {
+            "source_key": SOURCE_KEY,
+            "training_attribute": ATTRIBUTE,
+            "track_prefix": f"{station}:%",
+            "station": station,
+        })
+    return int(result.rowcount or 0)
 
 
 def learned_probability(features: dict[str, Any]) -> tuple[float | None, int]:

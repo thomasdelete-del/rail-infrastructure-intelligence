@@ -317,6 +317,36 @@ a:focus-visible {
   min-width: 250px;
   white-space: nowrap;
 }
+.platform-endpoint-delete {
+  display: inline-flex;
+  min-width: 250px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #a9443b;
+  border-radius: 999px;
+  background: #fff;
+  padding: 8px 14px;
+  color: #9e3028;
+  font-size: 0.78rem;
+  font-weight: 750;
+  cursor: pointer;
+}
+.platform-endpoint-delete > span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+}
+.platform-endpoint-delete small {
+  margin-top: 2px;
+  color: #77615f;
+  font-size: 0.67rem;
+}
+.platform-endpoint-delete:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
 .platform-check-switch-label {
   display: flex;
   width: auto !important;

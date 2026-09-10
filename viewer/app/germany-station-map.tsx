@@ -9,6 +9,7 @@ import {
   Satellite,
   Search,
   ShieldCheck,
+  Trash2,
   TrainFront,
 } from 'lucide-react';
 import type { Map as LeafletMap, LayerGroup, TileLayer } from 'leaflet';
@@ -379,6 +380,7 @@ export function SelectedStationMap({
     Record<string, Array<{ lat: number; lon: number }>>
   >({});
   const [learningMessage, setLearningMessage] = useState<string | null>(null);
+  const [endpointChangesDeleting, setEndpointChangesDeleting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [refreshNonce, setRefreshNonce] = useState(0);
@@ -1867,6 +1869,43 @@ export function SelectedStationMap({
         ),
       );
   };
+  const deleteEndpointChanges = () => {
+    if (
+      !window.confirm(
+        `Alle manuell geänderten Endpunkte für ${authoritativeName} aus Railway löschen? Die ursprünglichen OSM-Endpunkte bleiben erhalten.`,
+      )
+    )
+      return;
+    setEndpointChangesDeleting(true);
+    setLearningMessage('Geänderte Endpunkte werden aus Railway gelöscht …');
+    void fetch(`${API}/stations/aerial-analysis/endpoint-changes/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ station: authoritativeName }),
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error();
+        const result = (await response.json()) as { deleted: number };
+        setCorrectedGeometries({});
+        setEndpointReviews({});
+        setAerialResults({});
+        setReviewKey(null);
+        setCorrectionTarget(null);
+        setPendingPrimaryPoint(null);
+        setLearningMessage(
+          result.deleted
+            ? `${result.deleted} gespeicherte Endpunktänderungen wurden gelöscht.`
+            : 'Für diese Station waren keine geänderten Endpunkte gespeichert.',
+        );
+        setRefreshNonce((value) => value + 1);
+      })
+      .catch(() =>
+        setLearningMessage(
+          'Die geänderten Endpunkte konnten nicht aus Railway gelöscht werden.',
+        ),
+      )
+      .finally(() => setEndpointChangesDeleting(false));
+  };
   const sourceState = (status?: string) =>
     status === undefined
       ? 'loading'
@@ -2182,6 +2221,22 @@ export function SelectedStationMap({
           ) : null}
           <button type="button" onClick={onBack}>
             Zur Deutschlandkarte
+          </button>
+          <button
+            type="button"
+            className="platform-endpoint-delete"
+            onClick={deleteEndpointChanges}
+            disabled={endpointChangesDeleting}
+          >
+            {endpointChangesDeleting ? (
+              <i className="running-spinner" aria-hidden="true" />
+            ) : (
+              <Trash2 size={15} aria-hidden="true" />
+            )}
+            <span>
+              Geänderte Endpunkte löschen
+              <small>Nur für {authoritativeName}</small>
+            </span>
           </button>
         </div>
       </div>
