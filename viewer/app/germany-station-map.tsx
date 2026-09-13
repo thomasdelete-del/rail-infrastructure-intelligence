@@ -259,7 +259,12 @@ const geometryLength = (geometry: Array<{ lat: number; lon: number }>) =>
     .slice(1)
     .reduce((sum, point, index) => sum + distance(geometry[index], point), 0);
 
-const platformLongAxis = (geometry: Array<{ lat: number; lon: number }>) => {
+export const platformLongAxis = (
+  geometry: Array<{ lat: number; lon: number }>,
+  rails: Array<Array<{ lat: number; lon: number }>> = [],
+) => {
+  if (geometry.length < 4 || distance(geometry[0], geometry.at(-1)!) > 0.1)
+    return geometry;
   let axis: Array<{ lat: number; lon: number }> = [];
   let longest = 0;
   geometry.forEach((start, startIndex) =>
@@ -271,7 +276,48 @@ const platformLongAxis = (geometry: Array<{ lat: number; lon: number }>) => {
       }
     }),
   );
-  return axis;
+  if (axis.length < 2) return [];
+  const ring = geometry.slice(0, -1);
+  const longitudeScale = Math.cos((axis[0].lat * Math.PI) / 180);
+  const vector = (a: { lat: number; lon: number }, b: { lat: number; lon: number }) =>
+    [(b.lon - a.lon) * longitudeScale, b.lat - a.lat];
+  const direction = vector(axis[0], axis[1]);
+  const aligned = ring.map((point, index) => {
+    const segment = vector(point, ring[(index + 1) % ring.length]);
+    const denominator = Math.hypot(...segment) * Math.hypot(...direction);
+    return denominator > 0 && Math.abs(segment[0] * direction[0] + segment[1] * direction[1]) / denominator >= 0.94;
+  });
+  const startIndex = (aligned.findIndex((value) => !value) + 1) % ring.length;
+  const sides: Array<typeof geometry> = [];
+  let side: typeof geometry = [];
+  for (let offset = 0; offset < ring.length; offset++) {
+    const index = (startIndex + offset) % ring.length;
+    if (aligned[index]) {
+      if (!side.length) side.push(ring[index]);
+      side.push(ring[(index + 1) % ring.length]);
+    } else if (side.length) {
+      sides.push(side);
+      side = [];
+    }
+  }
+  if (side.length) sides.push(side);
+  const longestSide = Math.max(...sides.map(geometryLength), 0);
+  const candidates = sides.filter((candidate) => geometryLength(candidate) >= longestSide * 0.7);
+  const railDistance = (candidate: typeof geometry) => {
+    if (!rails.length) return -geometryLength(candidate);
+    return candidate.reduce((sum, point) => {
+      let nearest = Infinity;
+      rails.forEach((rail) => rail.slice(1).forEach((end, index) => {
+        const segment = vector(rail[index], end);
+        const relative = vector(rail[index], point);
+        const squared = segment[0] ** 2 + segment[1] ** 2;
+        const t = squared ? Math.max(0, Math.min(1, (relative[0] * segment[0] + relative[1] * segment[1]) / squared)) : 0;
+        nearest = Math.min(nearest, Math.hypot(relative[0] - t * segment[0], relative[1] - t * segment[1]));
+      }));
+      return sum + nearest;
+    }, 0) / candidate.length;
+  };
+  return candidates.sort((a, b) => railDistance(a) - railDistance(b))[0] ?? [];
 };
 type OfficialImageryConfig = {
   state?: string | null;
@@ -1280,12 +1326,16 @@ export function SelectedStationMap({
         let entrances = 0,
           equipment = 0;
         const explicitEdges: PlatformEdge[] = [];
+        const railGeometries = data.elements
+          .filter((item) => item.tags?.railway === 'rail' && item.geometry?.length)
+          .map((item) => item.geometry!);
         const seen = new Set<string>();
         data.elements.forEach((item) => {
           const key = `${item.type}-${item.id}`;
           if (seen.has(key)) return;
           seen.add(key);
           const tags = item.tags ?? {};
+          if (tags.railway === 'rail') return;
           const isPlatform =
             tags.railway === 'platform' ||
             tags.railway === 'platform_edge' ||
@@ -1318,8 +1368,8 @@ export function SelectedStationMap({
               item.geometry.map((p) => [p.lat, p.lon] as [number, number]),
               { color: '#0b5278', weight: 3, opacity: 0.55 },
             ).addTo(instance!);
-            const axis = platformLongAxis(item.geometry);
-            if (axis.length === 2) {
+            const axis = platformLongAxis(item.geometry, railGeometries);
+            if (axis.length >= 2) {
               explicitEdges.push({
                 id: `${item.type}-${item.id}`,
                 track: tags.ref || tags.local_ref || 'ohne Nummer',
