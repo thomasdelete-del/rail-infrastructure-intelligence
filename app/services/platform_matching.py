@@ -236,6 +236,7 @@ def load_matching_statistics() -> dict[str, Any]:
     """Return transparent completeness figures for the Railway materialization."""
     with get_engine().connect() as connection:
         total_stations = connection.execute(text("SELECT COUNT(*) FROM station_location_snapshot")).scalar_one()
+        osm_stations = connection.execute(text("SELECT COUNT(*) FROM osm_bahnsteig_cache")).scalar_one()
         cached_stations = connection.execute(text("SELECT COUNT(*) FROM betriebsstelle WHERE personenverkehr")).scalar_one()
         row = connection.execute(text("""
             SELECT
@@ -260,6 +261,7 @@ def load_matching_statistics() -> dict[str, Any]:
     denominator = int(total_stations or 0)
     return {
         "total_stations": denominator,
+        "osm_cached_stations": int(osm_stations or 0),
         "cached_isr_stations": int(cached_stations or 0),
         "stations_with_platforms": int(row["stations_with_platforms"] or 0),
         "primary_complete_stations": complete,

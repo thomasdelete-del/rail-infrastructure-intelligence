@@ -140,7 +140,18 @@ async def matching_sync_all(concurrency: int = Query(default=75, ge=1, le=100)):
 @app.get("/matching/statistics")
 def matching_statistics():
     try:
-        return {**load_matching_statistics(), "sync": _matching_sync_status}
+        statistics = load_matching_statistics()
+        sync = _matching_sync_status
+        if sync["status"] == "idle":
+            sync = {**sync, "sources": {
+                key: {"status": "available", "records": records}
+                for key, records in (
+                    ("db_infrago", statistics["total_stations"]),
+                    ("isr", statistics["platform_rows"]),
+                    ("osm", statistics["osm_cached_stations"]),
+                )
+            }}
+        return {**statistics, "sync": sync}
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
 
