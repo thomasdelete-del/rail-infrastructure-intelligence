@@ -254,6 +254,10 @@ a:focus-visible {
   font-weight: 750;
   line-height: 1.3;
 }
+.usable-length-good { color: #087443; }
+.usable-length-warning { color: #946200; background: #fff4cc; }
+.usable-length-bad { color: #b42318; background: #ffe9e7; }
+.platform-overview-sources .platform-source-isr-bad { background: #ffe9e7; color: #b42318; }
 .platform-overview-sources .platform-overview-comparison {
   grid-column: 1 / -1;
   border-color: #cbd9de;
@@ -2213,6 +2217,23 @@ a:focus-visible {
   gap: 8px;
   color: #526873;
   font-weight: 700;
+}
+.floating-review-anchor {
+  width: min(446px, calc(100% - 28px));
+  height: 108px;
+  visibility: hidden;
+  pointer-events: none;
+}
+.floating-review-window {
+  position: fixed;
+  z-index: 2147483000;
+  right: auto;
+  bottom: auto;
+  margin: 0;
+  width: 446px;
+  max-width: calc(100vw - 28px);
+  background: #fff;
+  box-shadow: 0 6px 24px rgb(7 27 43 / 0.28);
 }
 .field-loading svg {
   flex: 0 0 auto;

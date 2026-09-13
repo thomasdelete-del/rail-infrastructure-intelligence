@@ -13,6 +13,7 @@ import httpx
 from sqlalchemy import text
 
 from app.database import get_engine
+from app.services.osm_rounds import load_state_rounds
 
 ISR_URL = "https://geoviewer.deutschebahn.com/geoviewer-geoserver/ows"
 RINF_URL = "https://graph.data.era.europa.eu/repositories/rinf-plus"
@@ -132,7 +133,7 @@ async def fetch_osm_identity(client: httpx.AsyncClient, rl100: str) -> str | Non
     return None
 
 
-async def fetch_osm_identities_bulk(client: httpx.AsyncClient) -> dict[str, str]:
+async def _fetch_osm_identities_tiles(client: httpx.AsyncClient) -> dict[str, str]:
     """Load Germany in small non-overlapping boxes to respect public Overpass slots."""
     # Small non-overlapping tiles keep public Overpass response sizes bounded.
     latitudes = tuple(47.0 + index * 1.125 for index in range(9))
@@ -172,6 +173,33 @@ async def fetch_osm_identities_bulk(client: httpx.AsyncClient) -> dict[str, str]
         raise httpx.ReadTimeout(
             f"Keine OSM-Kachel erreichbar ({len(failed_tiles)} fehlgeschlagen)"
         )
+    return identities
+
+
+async def fetch_osm_identities_bulk(client: httpx.AsyncClient) -> dict[str, str]:
+    identities = {}
+    async def fetch_once(code):
+        query = (f'[out:json][timeout:180];area["ISO3166-2"="{code}"]'
+                 '["admin_level"="4"]->.state;node(area.state)["railway:ref"];out tags;')
+        response = await client.get(OVERPASS_URL, params={"data": query}, timeout=200,
+                                    headers={"User-Agent": "rail-infrastructure-intelligence/1.7"})
+        response.raise_for_status()
+        payload = response.json()
+        if payload.get("remark") or "elements" not in payload:
+            raise ValueError("Incomplete Overpass response")
+        return {item["tags"]["railway:ref"].upper(): item["tags"]["uic_ref"]
+                for item in payload["elements"]
+                if item.get("tags", {}).get("railway:ref") and item.get("tags", {}).get("uic_ref")}
+    async def store_state(code, result):
+        # Persist every successful state before another HTTP request.
+        if result:
+            with get_engine().begin() as connection:
+                connection.execute(text("UPDATE bahnsteige SET eva_nummer=:eva WHERE ds100_rl100=:rl100"),
+                                   [{"rl100": key, "eva": value} for key, value in result.items()])
+        identities.update(result)
+    pending = await load_state_rounds(fetch_once, store_state)
+    if pending:
+        raise httpx.ReadTimeout("OSM-Länder weiterhin offen: " + ", ".join(pending))
     return identities
 
 

@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AlertTriangle,
   Layers3,
@@ -15,6 +16,38 @@ import {
 import type { Map as LeafletMap, LayerGroup, TileLayer } from 'leaflet';
 const API =
   'https://rail-infrastructure-intelligence-production.up.railway.app';
+function FloatingReviewWindow({ children }: { children: ReactNode }) {
+  const anchor = useRef<HTMLDivElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  useEffect(() => {
+    const update = () => {
+      if (!anchor.current) return;
+      if (panel.current) {
+        anchor.current.style.height = `${panel.current.offsetHeight}px`;
+      }
+      const rect = anchor.current.getBoundingClientRect();
+      setPosition({ left: rect.left, top: rect.top });
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    if (anchor.current) observer.observe(anchor.current);
+    if (panel.current) observer.observe(panel.current);
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [position !== null]);
+  return <>
+    <div ref={anchor} className="endpoint-review-nav generic-endpoint-review floating-review-anchor" aria-hidden="true" />
+    {position && createPortal(
+      <div ref={panel} className="endpoint-review-nav floating-review-window" role="region" aria-label="Bahnsteig-Endpunkt prüfen"
+        style={{ left: position.left, top: position.top }}>{children}</div>, document.body)}
+  </>;
+}
 export type Station = {
   id: string;
   name: string;
@@ -42,6 +75,8 @@ const normalizeTrackRef = (value: string) =>
     .replace(/\s+/g, '')
     .toLocaleLowerCase('de');
 const hasTrackNumber = (value: string) => /\d/.test(value);
+export const trackRefTokens = (value: string) => value.split(/[;,\/]/)
+  .map((token) => normalizeTrackRef(token.trim())).filter(Boolean);
 const escapeHtml = (value: string) =>
   value.replace(
     /[&<>"']/g,
@@ -70,6 +105,14 @@ type PlatformEdge = {
   length: number;
   height?: string;
 };
+export const osmPlatformHeightMm = (height?: string): number | null => {
+  if (!height) return null;
+  const match = height.trim().replace(',', '.').match(/^(\d+(?:\.\d+)?)\s*(m|cm|mm)?$/i);
+  if (!match) return null;
+  const unit = match[2]?.toLowerCase() ?? 'm';
+  const value = Number(match[1]) * (unit === 'mm' ? 1 : unit === 'cm' ? 10 : 1000);
+  return value > 0 && value <= 2000 ? Math.round(value) : null;
+};
 type AuthoritativePlatform = {
   track: string;
   isr_operating_track?: string | null;
@@ -85,6 +128,14 @@ type AuthoritativePlatform = {
   mapping_confidence?: string | null;
   mapping_score?: number | null;
   mapping_evidence?: string[] | null;
+};
+export const usableLengthColor = (
+  usable?: number | null, net?: number | null, osm?: number | null,
+): 'good' | 'warning' | 'bad' | 'neutral' => {
+  if (usable == null || net == null || !Number.isFinite(usable) || !Number.isFinite(net)) return 'neutral';
+  if (usable > net) return 'bad';
+  if (osm == null || !Number.isFinite(osm)) return 'neutral';
+  return net - usable >= 5 && net < osm ? 'good' : 'warning';
 };
 type MatchingPayload = {
   data_version?: string | null;
@@ -385,6 +436,7 @@ export function SelectedStationMap({
   const [imageryOpacity, setImageryOpacity] = useState(82);
   const [loading, setLoading] = useState(true);
   const [platformDataLoading, setPlatformDataLoading] = useState(true);
+  const [osmRailUsage, setOsmRailUsage] = useState<string[]>([]);
   const [serverStatistics, setServerStatistics] =
     useState<ServerStatistics | null>(null);
   const [statisticsLoading, setStatisticsLoading] = useState(true);
@@ -616,7 +668,7 @@ export function SelectedStationMap({
     if (!edge.geometry.length) return;
     mapRef.current?.fitBounds(
       edge.geometry.map((point) => [point.lat, point.lon] as [number, number]),
-      { padding: [70, 70], maxZoom: 19, animate: false },
+      { padding: [40, 40], maxZoom: 21, animate: false },
     );
     requestAnimationFrame(() =>
       el.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }),
@@ -793,6 +845,7 @@ export function SelectedStationMap({
           ril: value.ril,
           stationNumber: value.station_number,
         });
+        setDbSources((current) => ({ ...current, stada: current.stada === 'active' ? 'active' : 'cached' }));
         if (!value.ril) return;
         const response = await fetch(
           `${API}/matching/stations/fetch?${new URLSearchParams({ rl100: value.ril })}`,
@@ -804,6 +857,11 @@ export function SelectedStationMap({
         setIsrIdentifierMatch(matching.identifier_match ?? null);
         setAuthoritativePlatforms(platforms);
         setPlatformDataLoading(false);
+        setDbSources((current) => ({
+          ...current,
+          netex: platforms.some((item) => item.net_construction_length_m != null) ? 'cached' : current.netex,
+          rinf: platforms.some((item) => item.rinf_platform_id) ? 'cached' : current.rinf,
+        }));
         localStorage.setItem(
           `station-platform-materialized:${station.id}`,
           JSON.stringify({
@@ -821,6 +879,7 @@ export function SelectedStationMap({
   }, [station, refreshNonce]);
   useEffect(() => {
     setIdentity(null);
+    setOsmRailUsage([]);
     setDbSources({});
     let localPlatformSnapshot:
       | { sourceModel?: string; dataVersion?: string | null; platforms: AuthoritativePlatform[]; identifierMatch?: MatchingPayload['identifier_match'] }
@@ -833,6 +892,13 @@ export function SelectedStationMap({
     if (localPlatformSnapshot?.sourceModel !== 'isr-height-v1')
       localPlatformSnapshot = undefined;
     setAuthoritativePlatforms(localPlatformSnapshot?.platforms ?? []);
+    if (localPlatformSnapshot?.platforms.length) {
+      setDbSources({
+        stada: station.id.startsWith('stada-') ? 'cached' : undefined,
+        netex: localPlatformSnapshot.platforms.some((item) => item.net_construction_length_m != null) ? 'cached' : undefined,
+        rinf: localPlatformSnapshot.platforms.some((item) => item.rinf_platform_id) ? 'cached' : undefined,
+      });
+    }
     setIsrIdentifierMatch(localPlatformSnapshot?.identifierMatch ?? null);
     setPlatformDataLoading(!localPlatformSnapshot?.platforms.length);
     setInventory(null);
@@ -911,6 +977,7 @@ export function SelectedStationMap({
             ? ((await matchingResponse.json()) as MatchingPayload)
             : null;
           if (matching) {
+            setPlatformDataLoading(false);
             const cachedVersion = localPlatformSnapshot?.dataVersion;
             if (
               !localPlatformSnapshot ||
@@ -1032,13 +1099,14 @@ export function SelectedStationMap({
       .then(() => setLastUpdated(new Date()))
       .catch((error: Error) => {
         if (error.name !== 'AbortError') {
-          setDbSources({
-            stada: 'unavailable',
-            netex: 'unavailable',
-            rinf: 'unavailable',
-            osm: 'unavailable',
-            fasta: 'unavailable',
-          });
+          setDbSources((current) => ({
+            ...current,
+            stada: current.stada === 'cached' ? 'cached' : 'unavailable',
+            netex: current.netex === 'cached' ? 'cached' : 'unavailable',
+            rinf: current.rinf === 'cached' ? 'cached' : 'unavailable',
+            osm: current.osm === 'cached' ? 'cached' : 'unavailable',
+            fasta: current.fasta === 'cached' ? 'cached' : 'unavailable',
+          }));
           setLoadError(
             'Die Stationsstammdaten konnten nicht vollständig geladen werden.',
           );
@@ -1329,6 +1397,11 @@ export function SelectedStationMap({
         const railGeometries = data.elements
           .filter((item) => item.tags?.railway === 'rail' && item.geometry?.length)
           .map((item) => item.geometry!);
+        setOsmRailUsage([...new Set(data.elements
+          .filter((item) => item.tags?.railway === 'rail' &&
+            item.geometry?.some((point) => distance(point, { lat: station.latitude, lon: station.longitude }) <= 100))
+          .map((item) => item.tags?.usage)
+          .filter((usage): usage is string => usage === 'main' || usage === 'branch'))]);
         const seen = new Set<string>();
         data.elements.forEach((item) => {
           const key = `${item.type}-${item.id}`;
@@ -1514,14 +1587,11 @@ export function SelectedStationMap({
       edge?: PlatformEdge;
       data?: AuthoritativePlatform;
     }> = authoritativePlatforms.map((data) => {
+      const candidates = platformEdges.filter((candidate) =>
+        hasTrackNumber(candidate.track) && trackRefTokens(candidate.track).includes(normalizeTrackRef(data.track)));
       const edge =
-        platformEdges.find(
-          (candidate) =>
-            hasTrackNumber(candidate.track) &&
-            normalizeTrackRef(candidate.track) ===
-              normalizeTrackRef(data.track),
-        ) ??
-        (authoritativePlatforms.length === 1
+        (candidates.length === 1 ? candidates[0] : undefined) ??
+        (candidates.length === 0 && authoritativePlatforms.length === 1 && platformEdges.length === 1
           ? platformEdges.find((candidate) => !hasTrackNumber(candidate.track))
           : undefined);
       if (edge) matched.add(edge.id);
@@ -1544,7 +1614,7 @@ export function SelectedStationMap({
     data?: AuthoritativePlatform,
   ) => {
     const dbLength = data?.net_construction_length_m;
-    if (!edge || dbLength == null || dbLength <= 0) return null;
+    if (!edge || dbLength == null || dbLength <= 0 || trackRefTokens(edge.track).length > 1) return null;
     const delta = edge.length - dbLength;
     const percent = (Math.abs(delta) / dbLength) * 100;
     return {
@@ -2085,7 +2155,7 @@ export function SelectedStationMap({
     state === 'active'
       ? 'Aktiv'
       : state === 'cached'
-        ? 'Cache / Referenzstand'
+        ? 'Gespeichert vorhanden'
         : state === 'loading'
           ? 'Wird geladen'
           : state === 'not_found'
@@ -2228,6 +2298,12 @@ export function SelectedStationMap({
       ? `DB/ISR Gleis ${data?.track ?? edge.track} ↔ OSM ref=${edge.track}`
       : `DB/ISR Gleis ${data?.track ?? '–'} ohne OSM-Zuordnung`;
   const stationMasterRows = [
+    {
+      subject: 'Strecke / Betriebsstelle',
+      attribute: 'Hauptbahn / Nebenbahn (OSM)',
+      value: osmRailUsage.length ? osmRailUsage.map((usage) => usage === 'main' ? 'Hauptbahn' : 'Nebenbahn').join(' / ') : 'In OSM nicht ausgewiesen',
+      source: 'OpenStreetMap · usage · Gleise im 100-m-Umkreis',
+    },
     {
       subject: 'Station',
       attribute: 'Stationsname',
@@ -2491,7 +2567,7 @@ export function SelectedStationMap({
         </div>
       ) : null}
       {currentReview ? (
-        <div className="endpoint-review-nav generic-endpoint-review">
+        <FloatingReviewWindow>
           <button
             type="button"
             onClick={() => navigateReview(-1)}
@@ -2587,7 +2663,7 @@ export function SelectedStationMap({
           >
             ›
           </button>
-        </div>
+        </FloatingReviewWindow>
       ) : null}
       {currentReview &&
       currentAerial?.candidate_start &&
@@ -2941,7 +3017,10 @@ export function SelectedStationMap({
                           {edge.osmId}
                         </span>
                       ) : edge?.trackSource === 'local_ref' ? (
-                        <span>OSM local_ref={track}</span>
+                        <span>OSM local_ref={edge.track}</span>
+                      ) : null}
+                      {edge && trackRefTokens(edge.track).length > 1 ? (
+                        <span style={{ color: '#946200' }}>Gemeinsame Bahnsteigfläche · Kantenseite nicht bestätigt</span>
                       ) : null}
                     </div>
                   </td>
@@ -2954,13 +3033,25 @@ export function SelectedStationMap({
                       <strong>
                         {data?.platform_height_mm != null
                           ? `${data.platform_height_mm} mm`
-                          : 'Nicht geliefert'}
+                          : osmPlatformHeightMm(edge?.height) != null
+                            ? `${osmPlatformHeightMm(edge?.height)} mm`
+                            : 'Nicht geliefert'}
                       </strong>
                       <span>
                         {data?.platform_height_mm != null
                           ? 'DB ISR'
-                          : 'DB ISR · nicht geliefert'}
+                          : osmPlatformHeightMm(edge?.height) != null
+                            ? 'OpenStreetMap · Ersatzquelle'
+                            : 'DB ISR · nicht geliefert'}
                       </span>
+                      {data?.platform_height_mm == null ? (
+                        <span style={{ color: '#b42318' }}>ISR-Bahnsteighöhe nicht vorhanden</span>
+                      ) : null}
+                      {data?.platform_height_mm == null && osmPlatformHeightMm(edge?.height) == null ? (
+                        osmGeometryStatus === 'loading'
+                          ? loadingField('OSM-Ersatzhöhe')
+                          : <span>Auch in OSM keine Bahnsteighöhe vorhanden</span>
+                      ) : null}
                       </div>
                     )}
                   </td>
@@ -3030,6 +3121,8 @@ export function SelectedStationMap({
                             : 'osm-confirm'
                         }
                         aria-pressed={confirmed}
+                        disabled={trackRefTokens(edge.track).length > 1}
+                        title={trackRefTokens(edge.track).length > 1 ? 'Erst die gleisbezogene Kantenseite zuordnen' : undefined}
                         onClick={() =>
                           setOsmConfirmed((current) => ({
                             ...current,
@@ -3079,8 +3172,8 @@ export function SelectedStationMap({
                       <button
                         type="button"
                         className={`deviation deviation-${comparison.level} deviation-button`}
-                        onClick={() => focusPlatformLength(edge)}
-                        title="Bahnsteigkante im Luftbild anzeigen"
+                        onClick={() => focusEndpoint(edge, 'start')}
+                        title="Auf Anfang zoomen und Korrekturfenster öffnen"
                       >
                         <strong>
                           OSM {Math.abs(comparison.delta).toFixed(1)} m{' '}
@@ -3105,7 +3198,9 @@ export function SelectedStationMap({
                       loadingField('ISR-Nutzlänge')
                     ) : data?.usable_length_m != null ? (
                       <div className="data-value">
-                        <strong>{data.usable_length_m.toFixed(1)} m</strong>
+                        <strong className={`usable-length-${usableLengthColor(data.usable_length_m, data.net_construction_length_m, edge?.length)}`}>
+                          {data.usable_length_m.toFixed(1)} m
+                        </strong>
                         <span>DB ISR · Gleis {track}</span>
                         {data.rinf_track_id ? (
                           <span>
@@ -3337,15 +3432,7 @@ export function SelectedStationMap({
         <div className="generic-platform-overview">
           {platformRows.map(({ track, edge, data }, index) => {
             const check = lengthComparison(edge, data);
-            const usableLengthState =
-              data?.usable_length_m != null &&
-              data.net_construction_length_m != null &&
-              data.usable_length_m >= data.net_construction_length_m + 5 &&
-              check?.level === 'low'
-                ? 'good'
-                : check && check.level !== 'low'
-                  ? 'warning'
-                  : 'neutral';
+            const usableLengthState = usableLengthColor(data?.usable_length_m, data?.net_construction_length_m, edge?.length);
             const reviewed = edge
               ? (['start', 'end'] as const).filter((endpoint) =>
                   Boolean(endpointReviews[`${edge.id}:${endpoint}`]),
@@ -3404,7 +3491,7 @@ export function SelectedStationMap({
                       className={`platform-source-isr platform-source-isr-${usableLengthState}`}
                     >
                       <b>DB ISR</b>
-                      <span>
+                      <span className={`usable-length-${usableLengthState}`}>
                         Bahnsteignutzlänge:{' '}
                         {data?.usable_length_m != null
                           ? `${data.usable_length_m.toFixed(1)} m`
@@ -3412,10 +3499,14 @@ export function SelectedStationMap({
                       </span>
                       {usableLengthState === 'good' ? (
                         <small>
-                          ≥ 5 m länger als Nettobaulänge · OSM–DB gering
+                          ≥ 5 m kürzer als Nettobaulänge · DB kürzer als OSM
                         </small>
                       ) : usableLengthState === 'warning' ? (
-                        <small>OSM–DB-Abweichung prüfen</small>
+                        <small>Mindestens eine Längenbedingung nicht erfüllt</small>
+                      ) : usableLengthState === 'bad' ? (
+                        <small>Nutzlänge größer als Nettobaulänge</small>
+                      ) : data?.usable_length_m != null ? (
+                        <small>Vergleichsdaten fehlen</small>
                       ) : null}
                     </div>
                     <div>
@@ -3859,6 +3950,7 @@ export function GermanyStationMap({
         const safeName = escapeHtml(s.name);
         const marker = L.circleMarker([s.latitude, s.longitude], {
           radius: 2.25,
+          bubblingMouseEvents: false,
           color: '#fff',
           weight: 0.75,
           fillColor: '#0b6b8a',
@@ -3878,6 +3970,28 @@ export function GermanyStationMap({
       });
     });
   }, [onSelect, stations]);
+  useEffect(() => {
+    const stationMap = map.current;
+    if (!stationMap) return;
+    const selectNearby = (event: { containerPoint: { x: number; y: number } }) => {
+      let nearest: Station | null = null;
+      let nearestDistance = 28;
+      for (const station of stations) {
+        const point = stationMap.latLngToContainerPoint([station.latitude, station.longitude]);
+        const distance = Math.hypot(point.x - event.containerPoint.x, point.y - event.containerPoint.y);
+        if (distance < nearestDistance) {
+          nearest = station;
+          nearestDistance = distance;
+        }
+      }
+      if (!nearest) return;
+      stationMap.setView([nearest.latitude, nearest.longitude], 16, { animate: true });
+      onSelect(nearest);
+      setMessage(`${nearest.name}: Stationsansicht wird geöffnet.`);
+    };
+    stationMap.on('click', selectNearby);
+    return () => { stationMap.off('click', selectNearby); };
+  }, [stations, onSelect]);
   const chooseStation = (candidate: StaDaStation) => {
     const latitude = Number(candidate.latitude),
       longitude = Number(candidate.longitude);
