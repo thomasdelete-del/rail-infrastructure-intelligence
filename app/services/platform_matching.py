@@ -422,12 +422,15 @@ async def sync_all_stations(concurrency: int = 75) -> dict[str, Any]:
             except Exception as error:
                 errors.append({"rl100": rl100, "error": type(error).__name__})
                 return [], {"changed": 0, "unchanged": 0}
-        results = await asyncio.gather(*(process(station) for station in stations))
-    for rows, write_result in results:
-        totals["stations"] += 1
-        totals["rows"] += len(rows)
-        totals["changed"] += write_result["changed"]
-        totals["unchanged"] += write_result["unchanged"]
+        # Keep only one bounded batch, never every station's rows/tasks at once.
+        batch_size = max(1, min(concurrency, 25))
+        for offset in range(0, len(stations), batch_size):
+            results = await asyncio.gather(*(process(station) for station in stations[offset:offset + batch_size]))
+            for rows, write_result in results:
+                totals["stations"] += 1
+                totals["rows"] += len(rows)
+                totals["changed"] += write_result["changed"]
+                totals["unchanged"] += write_result["unchanged"]
     return {**totals, "errors": errors, "source_errors": source_errors, "completed_at": datetime.now(UTC)}
 
 

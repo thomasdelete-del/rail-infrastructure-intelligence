@@ -1,4 +1,5 @@
 import asyncio
+import os
 from datetime import UTC, date, datetime, timedelta
 import httpx
 from fastapi import FastAPI, HTTPException, Query
@@ -111,7 +112,11 @@ def _start_matching_sync() -> bool:
 
 @app.on_event("startup")
 async def start_isr_background_sync():
-    _start_matching_sync()
+    # Restarts must serve persisted snapshots, not reload Germany into memory.
+    if os.getenv("MATCHING_SYNC_ON_STARTUP", "false").lower() == "true":
+        _start_matching_sync()
+    else:
+        _matching_sync_status["status"] = "idle"
 
 
 @app.get("/matching/stations/fetch")

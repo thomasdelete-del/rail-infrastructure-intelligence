@@ -1,5 +1,6 @@
 import asyncio
 import json
+from collections import OrderedDict
 from typing import Any
 
 import httpx
@@ -14,7 +15,30 @@ OVERPASS_ENDPOINTS = (
     "https://overpass.private.coffee/api/interpreter",
     "https://overpass.nchc.org.tw/api/interpreter",
 )
-_OSM_PLATFORM_CACHE: dict[tuple[float, float], dict[str, Any]] = {}
+_OSM_PLATFORM_CACHE: OrderedDict[tuple[float, float], dict[str, Any]] = OrderedDict()
+_REFRESH_TASKS: dict[tuple[float, float, str | None], asyncio.Task] = {}
+MAX_CACHE_ENTRIES = 32
+MAX_REFRESH_TASKS = 2
+
+
+def _remember_platforms(key, result):
+    _OSM_PLATFORM_CACHE[key] = result
+    _OSM_PLATFORM_CACHE.move_to_end(key)
+    while len(_OSM_PLATFORM_CACHE) > MAX_CACHE_ENTRIES:
+        _OSM_PLATFORM_CACHE.popitem(last=False)
+
+
+async def _bounded_refresh(latitude, longitude, rl100):
+    key = (latitude, longitude, rl100)
+    task = _REFRESH_TASKS.get(key)
+    if task is None:
+        if len(_REFRESH_TASKS) >= MAX_REFRESH_TASKS:
+            return {"elements": [], "cache_used": False, "refresh_running": False,
+                    "errors": ["OSM refresh capacity reached; retry later"]}
+        task = asyncio.create_task(_refresh_osm_platforms(latitude, longitude, rl100))
+        _REFRESH_TASKS[key] = task
+        task.add_done_callback(lambda finished: _REFRESH_TASKS.pop(key, None))
+    return await asyncio.shield(task)
 
 
 def platform_query(latitude: float, longitude: float, radius: int = 900) -> str:
@@ -112,7 +136,7 @@ async def _refresh_osm_platforms(latitude: float, longitude: float, rl100: str |
                         if not task.done():
                             task.cancel()
                     result = {"source": endpoint, "fallback_used": endpoint != OVERPASS_ENDPOINTS[0], "cache_used": False, "elements": elements}
-                    _OSM_PLATFORM_CACHE[cache_key] = result
+                    _remember_platforms(cache_key, result)
                     if rl100:
                         _store_platforms(rl100, elements)
                     return result
@@ -133,12 +157,15 @@ async def load_osm_platforms(latitude: float, longitude: float, rl100: str | Non
     if normalized_rl100:
         cached = _cached_platforms(normalized_rl100)
         if cached:
-            asyncio.create_task(_refresh_osm_platforms(latitude, longitude, normalized_rl100))
             return {
                 "source": "railway-osm-platform-cache",
                 "fallback_used": False,
                 "cache_used": True,
-                "refresh_running": True,
+                "refresh_running": False,
                 "elements": cached,
             }
-    return await _refresh_osm_platforms(latitude, longitude, normalized_rl100)
+    memory_key = (round(latitude, 3), round(longitude, 3))
+    if memory_key in _OSM_PLATFORM_CACHE:
+        _OSM_PLATFORM_CACHE.move_to_end(memory_key)
+        return {**_OSM_PLATFORM_CACHE[memory_key], "cache_used": True}
+    return await _bounded_refresh(latitude, longitude, normalized_rl100)
