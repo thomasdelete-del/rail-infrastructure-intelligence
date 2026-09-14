@@ -6,6 +6,8 @@ from sqlalchemy import text
 from app.database import get_engine
 
 HEADER = ['Station', 'RIL100', 'Gleis', 'Quelle', 'Laengenart', 'Laenge_m', 'Objekt_ID', 'Datenstand']
+HEADER += ['Anfang_Breitengrad_WGS84', 'Anfang_Laengengrad_WGS84',
+           'Ende_Breitengrad_WGS84', 'Ende_Laengengrad_WGS84']
 
 
 def csv_line(values):
@@ -63,7 +65,8 @@ def stored_rows(source):
                 if tags.get('railway') not in ('platform','platform_edge') and not (tags.get('public_transport')=='platform' and tags.get('train')=='yes'):
                     continue
                 yield [name,ril,tags.get('local_ref') or tags.get('ref') or '', 'OpenStreetMap',
-                       'OSM_Baulaenge_Originalgeometrie',geometry_length(points),f"way/{element['id']}",timestamp]
+                       'OSM_Baulaenge_Originalgeometrie',geometry_length(points),f"way/{element['id']}",timestamp,
+                       points[0]['lat'],points[0]['lon'],points[-1]['lat'],points[-1]['lon']]
 
 
 def export_csv(station='', ril='', track='', source='all', minimum=None, maximum=None):
@@ -76,4 +79,9 @@ def export_csv(station='', ril='', track='', source='all', minimum=None, maximum
         if minimum is not None and length < minimum: continue
         if maximum is not None and length > maximum: continue
         row[5] = f'{length:.1f}'.replace('.', ',')
+        # DB/ISR snapshots contain lengths, but no length-specific endpoints.
+        row += [''] * (len(HEADER) - len(row))
+        for index in range(8, 12):
+            if row[index] != '' and row[index] is not None:
+                row[index] = f'{float(row[index]):.6f}'.replace('.', ',')
         yield csv_line(row)
