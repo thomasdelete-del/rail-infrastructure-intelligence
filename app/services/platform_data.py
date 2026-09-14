@@ -199,6 +199,23 @@ async def load_platform_data(name: str, ril: str) -> dict[str, Any]:
     safe_ril = re.sub(r"[^A-Z0-9_]", "", ril.upper())
     if not safe_ril:
         raise ValueError("A valid RIL100 identifier is required")
+    try:
+        with get_engine().connect() as connection:
+            snapshot = connection.execute(text("""SELECT payload FROM station_source_snapshot
+                WHERE source='db_equipment' AND station_key=:key"""), {"key": _normalize(name)}).scalar()
+        if snapshot:
+            rows = snapshot['platforms']
+            with get_engine().begin() as connection:
+                for row in rows:
+                    connection.execute(text("""UPDATE bahnsteige SET db_net_construction_length_m=:length,
+                        db_platform_height_mm=:height,updated_at=CASE WHEN db_net_construction_length_m IS DISTINCT FROM :length
+                        OR db_platform_height_mm IS DISTINCT FROM :height THEN now() ELSE updated_at END
+                        WHERE ds100_rl100=:ril AND COALESCE(NULLIF(isr_gleisnummer_verkehr,''),isr_gleisnummer_betrieb)=:track"""),
+                        {'ril':safe_ril,'track':row['track'],'length':row.get('net_construction_length_m'),'height':row.get('platform_height_mm')})
+            return {'station':name,'ril':safe_ril,'platforms':rows,'sources':{'db_infrago':snapshot['url']},
+                    'status':{'db_infrago':'cached','era_rinf':'not_found'},'storage':'Railway snapshot'}
+    except RuntimeError:
+        pass
     today = date.today().isoformat()
     query = f'''PREFIX era: <http://data.europa.eu/949/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>

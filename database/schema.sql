@@ -167,3 +167,16 @@ CREATE TABLE IF NOT EXISTS osm_bahnsteig_cache (
     elements JSONB NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS station_source_snapshot (
+    source TEXT NOT NULL,
+    station_key TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (source, station_key)
+);
+CREATE TABLE IF NOT EXISTS source_import_status (
+    source TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    error TEXT,
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

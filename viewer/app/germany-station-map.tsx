@@ -436,6 +436,25 @@ export function SelectedStationMap({
   const [imageryOpacity, setImageryOpacity] = useState(82);
   const [loading, setLoading] = useState(true);
   const [platformDataLoading, setPlatformDataLoading] = useState(true);
+  const [sourceImports, setSourceImports] = useState<Array<{
+    source: string; status: string; stations: number; platform_rows: number;
+    latest_snapshot?: string; error?: string;
+  }>>([]);
+  const [sourceImportError, setSourceImportError] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    const update = async () => {
+      try {
+        const response = await fetch(`${API}/sources/preload-statistics`, { signal: controller.signal });
+        if (!response.ok) throw new Error();
+        const result = await response.json() as { sources: typeof sourceImports };
+        if (!controller.signal.aborted) { setSourceImports(result.sources); setSourceImportError(false); }
+      } catch { if (!controller.signal.aborted) setSourceImportError(true); }
+    };
+    void update();
+    const timer = setInterval(() => void update(), 15000);
+    return () => { controller.abort(); clearInterval(timer); };
+  }, []);
   const [osmRailUsage, setOsmRailUsage] = useState<string[]>([]);
   const [serverStatistics, setServerStatistics] =
     useState<ServerStatistics | null>(null);
@@ -3265,6 +3284,20 @@ export function SelectedStationMap({
       >
         <div>
           <h3 id="server-statistics-title">Datenbestand auf dem Server</h3>
+          <div className="source-sync-grid">
+            {(['db_equipment', 'netex'] as const).map((key) => {
+              const record = sourceImports.find((source) => source.source === key);
+              return <div key={key} className={`source-sync source-sync-${record?.status === 'running' ? 'running' : record?.status === 'completed' ? 'available' : 'pending'}`}>
+                {record?.status === 'running' ? <LoaderCircle size={16} /> : null}
+                <span><strong>{key === 'netex' ? 'OpenStation / NeTEx' : 'DB InfraGO Stationsausstattung'}</strong>
+                  <small>{record ? `${Number(record.stations).toLocaleString('de-DE')} Stationsdatensätze gespeichert` : sourceImportError ? 'Statistik nicht erreichbar' : 'Statistik wird geladen …'}</small>
+                  {key === 'db_equipment' && record ? <small>{Number(record.platform_rows).toLocaleString('de-DE')} Bahnsteigdatensätze</small> : null}
+                  <small>{record?.status === 'running' ? 'Import läuft im Hintergrund' : record?.status === 'completed' ? 'Import abgeschlossen' : record?.status === 'failed' ? 'Import unterbrochen – gespeicherte Daten bleiben erhalten' : 'Noch kein Importstand vorhanden'}</small>
+                  {record?.latest_snapshot ? <small>Letzter Speicherstand: {new Date(record.latest_snapshot).toLocaleString('de-DE')}</small> : null}
+                </span>
+              </div>;
+            })}
+          </div>
           <p>Stand der gespeicherten Stations- und Bahnsteigdaten</p>
         </div>
         {statisticsLoading ? (

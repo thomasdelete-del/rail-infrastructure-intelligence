@@ -24,10 +24,12 @@ from app.services.dynamic_station_sources import collect_db_station_sources
 from app.services.platform_data import load_platform_data
 from app.services.osm_platforms import load_osm_platforms
 from app.services.official_imagery import find_official_imagery
+from app.services.source_preload import run_source_preload, import_statistics
 from app.services.platform_matching import fetch_station_data, load_matching_statistics, sync_all_stations, sync_osm_station_identities
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
 _matching_sync_task: asyncio.Task | None = None
+_source_preload_task: asyncio.Task | None = None
 _matching_sync_status: dict = {
     "status": "pending", "started_at": None, "completed_at": None, "error": None,
     "sources": {
@@ -112,6 +114,8 @@ def _start_matching_sync() -> bool:
 
 @app.on_event("startup")
 async def start_isr_background_sync():
+    global _source_preload_task
+    _source_preload_task = asyncio.create_task(run_source_preload())
     # Restarts must serve persisted snapshots, not reload Germany into memory.
     if os.getenv("MATCHING_SYNC_ON_STARTUP", "false").lower() == "true":
         _start_matching_sync()
@@ -161,6 +165,11 @@ def source_freshness():
         return load_source_freshness()
     except RuntimeError:
         return {"last_database_update": None, "sources": [], "status": "database_not_configured"}
+
+
+@app.get('/sources/preload-statistics')
+def source_preload_statistics():
+    return {'sources': import_statistics()}
 
 @app.get("/stations/resolve-identity")
 async def resolve_identity(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):

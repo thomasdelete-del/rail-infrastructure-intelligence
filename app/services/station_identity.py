@@ -9,6 +9,8 @@ from typing import Any
 
 import httpx
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
+from app.database import get_engine
 
 from app.repository import load_station_locations, store_station_locations_once
 
@@ -75,6 +77,17 @@ async def resolve_station_identity(name: str, latitude: float, longitude: float)
 async def resolve_netex_identity(name: str, latitude: float, longitude: float) -> dict[str, Any]:
     """Resolve the authoritative station identity from the NeTEx delivery."""
     from app.collectors.openstation import select_station_identity_from_netex
+    try:
+        with get_engine().connect() as connection:
+            records = connection.execute(text("""SELECT payload->'identity' FROM station_source_snapshot
+                WHERE source='netex' AND lower(payload->'identity'->>'name')=lower(:name)"""), {'name':name}).scalars().all()
+        nearby = [record for record in records if record.get('latitude') is not None
+                  and record.get('longitude') is not None and
+                  _distance_m(latitude,longitude,float(record['latitude']),float(record['longitude'])) <= 1500]
+        if len(nearby) == 1:
+            return {**nearby[0], 'matched_name':nearby[0]['name'], 'storage':'Railway snapshot'}
+    except RuntimeError:
+        pass
     return select_station_identity_from_netex(await _netex_xml(), name, latitude, longitude)
 
 
