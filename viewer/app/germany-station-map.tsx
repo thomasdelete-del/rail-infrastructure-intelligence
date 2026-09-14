@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { PlatformLengthExport } from './platform-length-export';
 import {
   AlertTriangle,
   Layers3,
@@ -3354,6 +3355,7 @@ export function SelectedStationMap({
       >
         <div>
           <h3 id="server-statistics-title">Datenbestand auf dem Server</h3>
+          <PlatformLengthExport />
           <div className="source-sync-grid">
             {(['db_equipment', 'netex'] as const).map((key) => {
               const record = sourceImports.find((source) => source.source === key);

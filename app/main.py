@@ -28,6 +28,21 @@ from app.services.source_preload import run_source_preload, import_statistics
 from app.services.platform_matching import fetch_station_data, load_matching_statistics, sync_all_stations, sync_osm_station_identities
 
 app = FastAPI(title="Rail Infrastructure Intelligence", version="1.2.0", description="Source-aware digital infrastructure twin for railway stations.")
+
+@app.get('/exports/platform-lengths.csv')
+def export_platform_lengths(station: str = Query(default='', max_length=160),
+                            ril: str = Query(default='', max_length=12),
+                            track: str = Query(default='', max_length=30),
+                            source: str = Query(default='all', pattern='^(all|isr|db|osm)$'),
+                            minimum: float | None = Query(default=None, ge=0),
+                            maximum: float | None = Query(default=None, ge=0)):
+    from fastapi.responses import StreamingResponse
+    from app.services.platform_export import export_csv
+    if minimum is not None and maximum is not None and minimum > maximum:
+        raise HTTPException(status_code=422, detail='Minimum darf nicht größer als Maximum sein')
+    return StreamingResponse(export_csv(station,ril,track,source,minimum,maximum),
+        media_type='text/csv; charset=utf-8',
+        headers={'Content-Disposition':'attachment; filename="bahnsteiglaengen.csv"'})
 _matching_sync_task: asyncio.Task | None = None
 _source_preload_task: asyncio.Task | None = None
 _matching_sync_status: dict = {
