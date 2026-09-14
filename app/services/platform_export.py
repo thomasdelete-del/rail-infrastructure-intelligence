@@ -1,13 +1,17 @@
 """Streaming CSV export of stored lengths, without live source requests."""
 import csv
 import io
+import json
+import sqlite3
+import tempfile
 from math import asin, cos, radians, sin, sqrt
 from sqlalchemy import text
 from app.database import get_engine
 
-HEADER = ['Station', 'RIL100', 'Gleis', 'Quelle', 'Laengenart', 'Laenge_m', 'Objekt_ID', 'Datenstand']
+HEADER = ['Station', 'RIL100', 'Gleis', 'OSM_Baulaenge_m', 'DB_Nettobaulaenge_m', 'ISR_Nutzlaenge_m',
+          'OSM_Objekt_ID', 'DB_Quelle', 'ISR_Objekt_ID', 'OSM_Datenstand', 'DB_Datenstand', 'ISR_Datenstand']
 HEADER += ['Anfang_Breitengrad_WGS84', 'Anfang_Laengengrad_WGS84',
-           'Ende_Breitengrad_WGS84', 'Ende_Laengengrad_WGS84']
+           'Ende_Breitengrad_WGS84', 'Ende_Laengengrad_WGS84', 'Zuordnungshinweis']
 
 
 def csv_line(values):
@@ -71,17 +75,48 @@ def stored_rows(source):
 
 def export_csv(station='', ril='', track='', source='all', minimum=None, maximum=None):
     yield '\ufeff' + csv_line(HEADER)
-    for row in stored_rows(source):
-        length = float(row[5])
-        if station.casefold() not in str(row[0]).casefold(): continue
-        if ril and ril.casefold() != str(row[1]).casefold(): continue
-        if track and track.casefold() != str(row[2]).casefold(): continue
-        if minimum is not None and length < minimum: continue
-        if maximum is not None and length > maximum: continue
-        row[5] = f'{length:.1f}'.replace('.', ',')
-        # DB/ISR snapshots contain lengths, but no length-specific endpoints.
-        row += [''] * (len(HEADER) - len(row))
-        for index in range(8, 12):
-            if row[index] != '' and row[index] is not None:
-                row[index] = f'{float(row[index]):.6f}'.replace('.', ',')
-        yield csv_line(row)
+    # Disk-backed grouping keeps nationwide exports bounded in RAM.
+    with tempfile.TemporaryDirectory(prefix='platform-export-') as directory:
+        connection = sqlite3.connect(directory + '/rows.sqlite')
+        try:
+            connection.execute('CREATE TABLE records (station_key TEXT, track TEXT, source TEXT, object_id TEXT, payload TEXT, PRIMARY KEY(station_key,track,source,object_id))')
+            for row in stored_rows('all'):
+                if station.casefold() not in str(row[0]).casefold(): continue
+                if ril and ril.casefold() != str(row[1]).casefold(): continue
+                if track and track.casefold() != str(row[2]).casefold(): continue
+                # Without RIL100, do not guess that similarly named stations are identical.
+                key = str(row[1]).upper() if row[1] else 'unresolved:' + row[3] + ':' + str(row[0])
+                track_key = str(row[2]).casefold().strip() or 'unassigned:' + str(row[6])
+                connection.execute('INSERT OR IGNORE INTO records VALUES(?,?,?,?,?)',
+                    (key,track_key,row[3],str(row[6]),json.dumps(row,default=str)))
+            connection.commit()
+            groups = connection.execute('SELECT DISTINCT station_key,track FROM records ORDER BY station_key,track')
+            for station_key, track_key in groups:
+                records = [json.loads(payload) for (payload,) in connection.execute(
+                    'SELECT payload FROM records WHERE station_key=? AND track=? ORDER BY source,object_id', (station_key,track_key))]
+                candidates = {name:[row for row in records if row[3]==name] for name in
+                    ('OpenStreetMap','DB InfraGO Stationsausstattung','DB ISR')}
+                required = {'osm':'OpenStreetMap','db':'DB InfraGO Stationsausstattung','isr':'DB ISR'}.get(source)
+                selected = candidates[required] if required else records
+                if not selected: continue
+                if minimum is not None or maximum is not None:
+                    if not any((minimum is None or float(row[5])>=minimum) and
+                               (maximum is None or float(row[5])<=maximum) for row in selected): continue
+                osm,db,isr = [rows[0] if len(rows)==1 else None for rows in candidates.values()]
+                primary = isr or db or osm or records[0]
+                notes = [f'{name}: {len(rows)} Kandidaten, Länge nicht eindeutig' for name,rows in candidates.items() if len(rows)>1]
+                if not primary[1]: notes.append('Stationsidentität nicht zugeordnet; Quellen nicht zusammengeführt')
+                if not primary[2]: notes.append('Gleis nicht zugeordnet')
+                def length(row):
+                    return f'{float(row[5]):.1f}'.replace('.', ',') if row else ''
+                def field(row,index):
+                    return row[index] if row else ''
+                coordinates = osm[8:12] if osm and len(osm)>=12 else ['']*4
+                coordinates = [f'{float(value):.6f}'.replace('.', ',') if value is not None and value!='' else '' for value in coordinates]
+                yield csv_line([primary[0],primary[1],primary[2],length(osm),length(db),length(isr),
+                    ' | '.join(str(row[6]) for row in candidates['OpenStreetMap']),
+                    ' | '.join(str(row[6]) for row in candidates['DB InfraGO Stationsausstattung']),
+                    ' | '.join(str(row[6]) for row in candidates['DB ISR']),
+                    field(osm,7),field(db,7),field(isr,7),*coordinates,'; '.join(notes)])
+        finally:
+            connection.close()
