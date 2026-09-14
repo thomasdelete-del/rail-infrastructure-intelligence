@@ -134,10 +134,9 @@ export const usableLengthColor = (
   usable?: number | null, net?: number | null, osm?: number | null,
 ): 'good' | 'warning' | 'bad' | 'neutral' => {
   if (usable == null || !Number.isFinite(usable)) return 'neutral';
-  if (net == null || !Number.isFinite(net)) return 'warning';
-  if (usable > net) return 'bad';
-  if (osm == null || !Number.isFinite(osm)) return 'warning';
-  return net - usable >= 5 && net < osm ? 'good' : 'warning';
+  const lengths = [net, osm].filter((value): value is number => value != null && Number.isFinite(value));
+  if (lengths.some((length) => usable > length)) return 'bad';
+  return lengths.length === 2 && lengths.every((length) => length - usable >= 5) ? 'good' : 'warning';
 };
 type MatchingPayload = {
   data_version?: string | null;
@@ -3605,12 +3604,12 @@ export function SelectedStationMap({
                       </span>
                       {usableLengthState === 'good' ? (
                         <small>
-                          ≥ 5 m kürzer als Nettobaulänge · DB kürzer als OSM
+                          ≥ 5 m kürzer als DB- und OSM-Baulänge
                         </small>
                       ) : usableLengthState === 'warning' ? (
                         <small>Mindestens eine Längenbedingung nicht erfüllt</small>
                       ) : usableLengthState === 'bad' ? (
-                        <small>Nutzlänge größer als Nettobaulänge</small>
+                        <small>Nutzlänge größer als DB- oder OSM-Baulänge</small>
                       ) : data?.usable_length_m != null ? (
                         <small>Vergleichsdaten fehlen</small>
                       ) : null}
