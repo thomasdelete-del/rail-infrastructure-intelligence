@@ -2601,3 +2601,7 @@ a:focus-visible {
   background: #08789a;
   color: #fff;
 }
+.measurement-result { position: absolute; left: 12px; bottom: 28px; z-index: 1100; padding: 12px; background: white; color: #123448; border: 1px solid #a21caf; border-radius: 8px; box-shadow: 0 3px 12px #0003; max-width: calc(100% - 24px); font-size: 14px; }
+.measurement-result strong { display: block; font-size: 18px; }
+.measurement-result small { display: block; margin: 6px 0; }
+.measurement-endpoint span { display: grid; place-items: center; width: 24px; height: 24px; background: #a21caf; color: white; border: 2px solid white; border-radius: 50%; box-shadow: 0 1px 5px #0006; font-weight: bold; }

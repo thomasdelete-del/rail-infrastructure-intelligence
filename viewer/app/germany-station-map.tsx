@@ -389,6 +389,62 @@ export function SelectedStationMap({
 }) {
   const el = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
+  const [measuring, setMeasuring] = useState(false);
+  const [measurement, setMeasurement] = useState<Array<{ lat: number; lon: number }>>([]);
+  const measurementPoints = useRef<Array<{ lat: number; lon: number }>>([]);
+  useEffect(() => {
+    if (!measuring || !mapRef.current) return;
+    const map = mapRef.current;
+    let disposed = false;
+    let layer: LayerGroup | undefined;
+    const previousCursor = map.getContainer().style.cursor;
+    const doubleClickZoom = map.doubleClickZoom.enabled();
+    map.doubleClickZoom.disable();
+    map.getContainer().style.cursor = 'crosshair';
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMeasuring(false); };
+    document.addEventListener('keydown', escape);
+    void import('leaflet').then((L) => {
+      if (disposed) return;
+      layer = L.layerGroup().addTo(map);
+      const draw = () => {
+        layer!.clearLayers();
+        const points = measurementPoints.current;
+        if (points.length === 2) L.polyline(points.map(p => [p.lat, p.lon] as [number, number]), {
+          color: '#a21caf', weight: 2, dashArray: '5 4', interactive: false,
+        }).addTo(layer!);
+        points.forEach((point, index) => {
+          const marker = L.marker([point.lat, point.lon], {
+            draggable: true, bubblingMouseEvents: false,
+            icon: L.divIcon({ className: 'measurement-endpoint', html: `<span>${index + 1}</span>`, iconSize: [24, 24], iconAnchor: [12, 12] }),
+          }).addTo(layer!);
+          marker.on('dragend', () => {
+            const p = marker.getLatLng();
+            measurementPoints.current = measurementPoints.current.map((old, i) => i === index ? { lat: p.lat, lon: p.lng } : old);
+            setMeasurement([...measurementPoints.current]);
+            draw();
+          });
+        });
+      };
+      const click = (event: { latlng: { lat: number; lng: number } }) => {
+        if (measurementPoints.current.length >= 2) return;
+        measurementPoints.current = [...measurementPoints.current, { lat: event.latlng.lat, lon: event.latlng.lng }];
+        setMeasurement([...measurementPoints.current]);
+        draw();
+      };
+      map.on('click', click);
+      draw();
+      cleanupClick = () => map.off('click', click);
+    });
+    let cleanupClick = () => {};
+    return () => {
+      disposed = true;
+      cleanupClick();
+      layer?.remove();
+      document.removeEventListener('keydown', escape);
+      map.getContainer().style.cursor = previousCursor;
+      if (doubleClickZoom) map.doubleClickZoom.enable();
+    };
+  }, [measuring, measurement.length]);
   const reviewLayerRef = useRef<LayerGroup | null>(null);
   const originalGeometriesRef = useRef<
     Record<string, Array<{ lat: number; lon: number }>>
@@ -744,6 +800,7 @@ export function SelectedStationMap({
       setCorrectionTarget(null);
     };
     const handleClick = (event: { latlng: { lat: number; lng: number } }) => {
+      if (measuring) return;
       if (correctionTarget) applyCoordinate(event, correctionTarget);
     };
     const handleDoubleClick = (event: {
@@ -751,6 +808,7 @@ export function SelectedStationMap({
       originalEvent?: MouseEvent;
     }) => {
       const target = correctionTarget ?? reviewedTarget;
+      if (measuring) return;
       if (!target) return;
       event.originalEvent?.preventDefault();
       applyCoordinate(event, target);
@@ -765,6 +823,7 @@ export function SelectedStationMap({
     aerialResults,
     authoritativeName,
     correctionTarget,
+    measuring,
     endpointReviews,
     platformEdges,
     reviewKey,
@@ -2471,6 +2530,11 @@ export function SelectedStationMap({
           className="generic-map-controls map-controls"
           aria-label="Kartenebenen"
         >
+          <button type="button" className={measuring ? 'map-toggle map-toggle-active' : 'map-toggle'} aria-pressed={measuring}
+            onClick={() => {
+              if (!measuring) { measurementPoints.current = []; setMeasurement([]); setCorrectionTarget(null); }
+              setMeasuring(!measuring);
+            }}>Bahnsteiglänge messen</button>
           <button
             type="button"
             className={
@@ -2544,6 +2608,12 @@ export function SelectedStationMap({
             <MapPin size={17} />
           </button>
         </div>
+        {measuring ? <section className="measurement-result" aria-label="Bahnsteiglängenmessung" aria-live="polite">
+          <strong>{measurement.length === 2 ? `${geometryLength(measurement).toFixed(1)} m` : `${measurement.length === 0 ? 'Ersten' : 'Zweiten'} Endpunkt auf der Karte auswählen`}</strong>
+          {measurement.map((point, index) => <div key={index}>Endpunkt {index + 1}: {point.lat.toFixed(6)}, {point.lon.toFixed(6)}</div>)}
+          <small>WGS84 · Breite, Länge · Luftlinie · Punkte zum Anpassen ziehen. Keine Speicherung.</small>
+          <div><button type="button" className="map-toggle" onClick={() => { measurementPoints.current = []; setMeasurement([]); }}>Neu messen</button> <button type="button" className="map-toggle" onClick={() => setMeasuring(false)}>Beenden</button></div>
+        </section> : null}
       </div>
       {correctionError ? (
         <div className="endpoint-corridor-error" role="alert">
