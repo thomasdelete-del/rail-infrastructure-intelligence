@@ -133,9 +133,10 @@ type AuthoritativePlatform = {
 export const usableLengthColor = (
   usable?: number | null, net?: number | null, osm?: number | null,
 ): 'good' | 'warning' | 'bad' | 'neutral' => {
-  if (usable == null || net == null || !Number.isFinite(usable) || !Number.isFinite(net)) return 'neutral';
+  if (usable == null || !Number.isFinite(usable)) return 'neutral';
+  if (net == null || !Number.isFinite(net)) return 'warning';
   if (usable > net) return 'bad';
-  if (osm == null || !Number.isFinite(osm)) return 'neutral';
+  if (osm == null || !Number.isFinite(osm)) return 'warning';
   return net - usable >= 5 && net < osm ? 'good' : 'warning';
 };
 type MatchingPayload = {
