@@ -59,10 +59,26 @@ def test_normalizes_stada_station_for_picker():
 
 def test_searches_db_netex_station_list(monkeypatch):
     xml = b'''<root><StopPlace id="dhid:de:1"><Name>Dorheim</Name><PrivateCode>1273</PrivateCode><Centroid><Location><Latitude>50.35</Latitude><Longitude>8.79</Longitude></Location></Centroid></StopPlace><StopPlace id="dhid:de:2"><Name>Berlin Hbf</Name><Centroid><Location><Latitude>52.52</Latitude><Longitude>13.36</Longitude></Location></Centroid></StopPlace></root>'''
-    async def fixture(): return xml
-    monkeypatch.setattr(station_identity, "_netex_xml", fixture)
+    from app.collectors.openstation import extract_station_identities
+    monkeypatch.setattr(station_identity, "load_netex_identities", lambda: extract_station_identities(xml))
+    async def forbidden(): raise AssertionError('No national XML download allowed')
+    monkeypatch.setattr(station_identity, "_netex_xml", forbidden)
     result = asyncio.run(station_identity.search_netex_stations("Dorheim"))
     assert [item["station_number"] for item in result] == [1273]
+
+
+def test_identity_uses_reduced_snapshots_without_xml(monkeypatch):
+    monkeypatch.setattr(station_identity, 'load_netex_identities', lambda: [
+        {'name':'Achern', 'netex_id':'test:6', 'station_number':6, 'latitude':48.63, 'longitude':8.07}])
+    async def forbidden(): raise AssertionError('No national XML download allowed')
+    monkeypatch.setattr(station_identity, '_netex_xml', forbidden)
+    result = asyncio.run(station_identity.resolve_netex_identity('Achern',48.63,8.07))
+    assert result['storage'] == 'Railway snapshot'
+
+
+def test_national_xml_request_path_is_disabled():
+    with pytest.raises(RuntimeError, match='streaming background importer'):
+        asyncio.run(station_identity._netex_xml())
 
 
 def test_stada_list_prefers_railway_snapshot_without_external_request(monkeypatch):

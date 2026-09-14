@@ -76,29 +76,33 @@ async def resolve_station_identity(name: str, latitude: float, longitude: float)
 
 async def resolve_netex_identity(name: str, latitude: float, longitude: float) -> dict[str, Any]:
     """Resolve the authoritative station identity from the NeTEx delivery."""
-    from app.collectors.openstation import select_station_identity_from_netex
-    try:
-        with get_engine().connect() as connection:
-            records = connection.execute(text("""SELECT payload->'identity' FROM station_source_snapshot
-                WHERE source='netex' AND lower(payload->'identity'->>'name')=lower(:name)"""), {'name':name}).scalars().all()
-        nearby = [record for record in records if record.get('latitude') is not None
-                  and record.get('longitude') is not None and
-                  _distance_m(latitude,longitude,float(record['latitude']),float(record['longitude'])) <= 1500]
-        if len(nearby) == 1:
-            return {**nearby[0], 'matched_name':nearby[0]['name'], 'storage':'Railway snapshot'}
-    except RuntimeError:
-        pass
-    return select_station_identity_from_netex(await _netex_xml(), name, latitude, longitude)
+    from app.collectors.openstation import select_station_identity_from_records
+    identity = select_station_identity_from_records(load_netex_identities(), name, latitude, longitude)
+    return {**identity, 'matched_name':identity['name'], 'storage':'Railway snapshot'}
+
+
+def load_netex_identities():
+    """Only reduced station identities; never fetch national XML in a request."""
+    with get_engine().connect() as connection:
+        return connection.execute(text("""SELECT payload->'identity' FROM station_source_snapshot
+            WHERE source='netex'""")).scalars().all()
+
+
+async def load_netex_infrastructure(name, latitude, longitude):
+    from app.collectors.openstation import stop_place_inventory
+    identity = await resolve_netex_identity(name, latitude, longitude)
+    with get_engine().connect() as connection:
+        record = connection.execute(text("""SELECT payload->'infrastructure' FROM station_source_snapshot
+            WHERE source='netex' AND station_key=:key"""),
+            {'key': str(identity.get('station_number') or identity['netex_id'])}).scalar()
+    if not record:
+        raise LookupError('NeTEx infrastructure snapshot is not available yet')
+    return stop_place_inventory(record)
 
 
 async def _netex_xml() -> bytes:
     """Download the NeTEx delivery once per hour for identity operations."""
-    global _NETEX_CACHE
-    from app.collectors.openstation import OpenStationCollector
-    async with _NETEX_CACHE_LOCK:
-        if _NETEX_CACHE is None or monotonic() - _NETEX_CACHE[0] > 3600:
-            _NETEX_CACHE = (monotonic(), await OpenStationCollector().fetch_netex())
-        return _NETEX_CACHE[1]
+    raise RuntimeError('National NeTEx XML is restricted to the streaming background importer')
 
 
 async def netex_xml() -> bytes:
@@ -108,10 +112,9 @@ async def netex_xml() -> bytes:
 
 async def search_netex_stations(query: str, limit: int = 12) -> list[dict[str, Any]]:
     """Return ranked DB NeTEx stations for the station picker."""
-    from app.collectors.openstation import extract_station_identities
     needle = " ".join(query.casefold().split())
     matches = []
-    for identity in extract_station_identities(await _netex_xml()):
+    for identity in load_netex_identities():
         name = " ".join(identity["name"].casefold().split())
         similarity = SequenceMatcher(None, needle, name).ratio()
         if needle not in name and similarity < 0.55:

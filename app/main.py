@@ -292,9 +292,8 @@ async def station_official_imagery(latitude: float = Query(ge=47, le=56), longit
 async def station_infrastructure(name: str = Query(min_length=2, max_length=160), latitude: float = Query(ge=47, le=56), longitude: float = Query(ge=5, le=16)):
     """Build the same NeTEx object catalogue for every identity-matched station."""
     try:
-        xml = await netex_xml()
-        identity = select_station_identity_from_netex(xml, name, latitude, longitude)
-        return stop_place_inventory(extract_station_stop_place(xml, identity["netex_id"]))
+        from app.services.station_identity import load_netex_infrastructure
+        return await load_netex_infrastructure(name, latitude, longitude)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:

@@ -70,6 +70,11 @@ async def preload_netex(client):
                     stack[-2].remove(element)
                 element.clear()
                 await asyncio.sleep(0)
+            elif not any(local_name(parent.tag) == 'StopPlace' for parent in stack):
+                # Release unrelated frames too, not just station subtrees.
+                if len(stack) > 1:
+                    stack[-2].remove(element)
+                element.clear()
             stack.pop()
 
 

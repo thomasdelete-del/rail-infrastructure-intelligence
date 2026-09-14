@@ -107,9 +107,13 @@ def select_station_identity_from_netex(
     xml: bytes, name: str, latitude: float | None = None, longitude: float | None = None,
 ) -> dict[str, Any]:
     """Select one station deterministically by name and optional proximity."""
+    return select_station_identity_from_records(extract_station_identities(xml), name, latitude, longitude)
+
+
+def select_station_identity_from_records(identities, name, latitude=None, longitude=None):
     normalized = " ".join(name.casefold().replace("bahnhof", " ").replace("hbf", " ").split())
     candidates = []
-    for identity in extract_station_identities(xml):
+    for identity in identities:
         candidate_name = " ".join(identity["name"].casefold().replace("bahnhof", " ").replace("hbf", " ").split())
         similarity = SequenceMatcher(None, normalized, candidate_name).ratio()
         distance = None
