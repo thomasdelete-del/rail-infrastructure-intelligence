@@ -82,7 +82,11 @@ def import_status():
         row=connection.execute(text('''SELECT
             COUNT(DISTINCT s.ril) AS eligible_stations,
             COUNT(DISTINCT s.ril) FILTER(WHERE c.ds100_rl100 IS NOT NULL) AS cached_stations,
-            COUNT(DISTINCT s.ril) FILTER(WHERE c.elements='[]'::jsonb) AS empty_stations,
+            COUNT(DISTINCT s.ril) FILTER(WHERE c.ds100_rl100 IS NOT NULL AND NOT EXISTS (
+                SELECT 1 FROM jsonb_array_elements(c.elements) e
+                WHERE e->'tags'->>'railway' IN ('platform','platform_edge') OR
+                (e->'tags'->>'public_transport'='platform' AND e->'tags'->>'train'='yes')
+            )) AS empty_stations,
             COUNT(DISTINCT s.ril) FILTER(WHERE p.status='failed') AS failed_stations,
             MAX(c.updated_at) AS latest_snapshot
             FROM station_location_snapshot s
