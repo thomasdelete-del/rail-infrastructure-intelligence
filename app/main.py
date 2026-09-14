@@ -45,6 +45,12 @@ def export_platform_lengths(station: str = Query(default='', max_length=160),
         headers={'Content-Disposition':'attachment; filename="bahnsteiglaengen.csv"'})
 _matching_sync_task: asyncio.Task | None = None
 _source_preload_task: asyncio.Task | None = None
+_osm_preload_task: asyncio.Task | None = None
+
+@app.get('/sources/osm-platform-preload-status')
+def osm_platform_preload_status():
+    from app.services.osm_preload import import_status
+    return {'running':_osm_preload_task is not None and not _osm_preload_task.done(), **import_status()}
 _matching_sync_status: dict = {
     "status": "pending", "started_at": None, "completed_at": None, "error": None,
     "sources": {
@@ -129,7 +135,9 @@ def _start_matching_sync() -> bool:
 
 @app.on_event("startup")
 async def start_isr_background_sync():
-    global _source_preload_task
+    global _source_preload_task, _osm_preload_task
+    from app.services.osm_preload import run_osm_preload
+    _osm_preload_task = asyncio.create_task(run_osm_preload())
     _source_preload_task = asyncio.create_task(run_source_preload())
     # Restarts must serve persisted snapshots, not reload Germany into memory.
     if os.getenv("MATCHING_SYNC_ON_STARTUP", "false").lower() == "true":

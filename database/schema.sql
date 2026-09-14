@@ -167,6 +167,13 @@ CREATE TABLE IF NOT EXISTS osm_bahnsteig_cache (
     elements JSONB NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS osm_platform_import_progress (
+    ds100_rl100 TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    checked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS station_source_snapshot (
     source TEXT NOT NULL,
     station_key TEXT NOT NULL,
