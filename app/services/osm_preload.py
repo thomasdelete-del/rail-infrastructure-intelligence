@@ -1,4 +1,4 @@
-"""Resumable nationwide OSM geometry import, one bounded request at a time."""
+"""Resumable nationwide OSM geometry import with bounded parallel requests."""
 import asyncio
 import json
 import logging
@@ -9,9 +9,11 @@ from app.services.osm_platforms import OVERPASS_ENDPOINTS, platform_query, _plat
 
 logger = logging.getLogger(__name__)
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
+PRELOAD_CONCURRENCY = 2
+PRELOAD_BATCH_PAUSE_SECONDS = 5
 
 
-def next_station():
+def next_stations(limit=PRELOAD_CONCURRENCY):
     with get_engine().connect() as connection:
         return connection.execute(text('''SELECT s.ril,s.latitude,s.longitude
             FROM station_location_snapshot s
@@ -22,7 +24,8 @@ def next_station():
               AND (p.checked_at IS NULL OR
                    (p.status='failed' AND p.checked_at<now()-interval '1 hour') OR
                    (p.status='completed' AND p.checked_at<now()-interval '30 days'))
-            ORDER BY p.checked_at NULLS FIRST,s.station_number LIMIT 1''')).first()
+            ORDER BY p.checked_at NULLS FIRST,s.station_number LIMIT :limit'''),
+            {'limit': limit}).all()
 
 
 def store_result(ril, elements=None, error=None):
@@ -59,19 +62,29 @@ async def run_osm_preload():
                                headers={'User-Agent':'rail-infrastructure-intelligence/2.0'}) as client:
         while True:
             try:
-                station=next_station()
-                if station is None:
+                stations=next_stations()
+                if not stations:
                     await asyncio.sleep(60)
                     continue
-                ril,latitude,longitude=station
-                try:
-                    elements=await fetch_geometry(client,OVERPASS_ENDPOINTS[endpoint_index % len(OVERPASS_ENDPOINTS)],latitude,longitude)
-                    store_result(ril,elements=elements)
-                    del elements
-                except (httpx.HTTPError,ValueError) as error:
-                    store_result(ril,error=f'{type(error).__name__}: {error}')
-                endpoint_index+=1
-                await asyncio.sleep(20)
+
+                async def import_station(station, endpoint):
+                    ril,latitude,longitude=station
+                    try:
+                        elements=await fetch_geometry(
+                            client,endpoint,latitude,longitude)
+                        store_result(ril,elements=elements)
+                        del elements
+                    except (httpx.HTTPError,ValueError) as error:
+                        store_result(ril,error=f'{type(error).__name__}: {error}')
+
+                jobs=[]
+                for offset,station in enumerate(stations):
+                    endpoint=OVERPASS_ENDPOINTS[
+                        (endpoint_index+offset) % len(OVERPASS_ENDPOINTS)]
+                    jobs.append(import_station(station,endpoint))
+                endpoint_index+=len(stations)
+                await asyncio.gather(*jobs)
+                await asyncio.sleep(PRELOAD_BATCH_PAUSE_SECONDS)
             except Exception:
                 logger.exception('OSM background import paused; will retry')
                 await asyncio.sleep(60)
