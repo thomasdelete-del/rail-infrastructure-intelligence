@@ -540,6 +540,7 @@ export function SelectedStationMap({
     >;
   }>({ sources: {} });
   const [reviewKey, setReviewKey] = useState<string | null>(null);
+  const reviewKeyRef = useRef<string | null>(null);
   const [endpointReviews, setEndpointReviews] = useState<
     Record<string, 'correct' | 'none' | 'corrected'>
   >({});
@@ -731,7 +732,10 @@ export function SelectedStationMap({
     const point =
       endpoint === 'start' ? edge.geometry[0] : edge.geometry.at(-1);
     setCorrectionError(null);
-    setReviewKey(`${edge.id}:${endpoint}`);
+    const nextReviewKey = `${edge.id}:${endpoint}`;
+    reviewKeyRef.current = nextReviewKey;
+    setReviewKey(nextReviewKey);
+    setLearningMessage(null);
     setImagery(officialImageryStatus === 'active' ? 'official' : 'satellite');
     if (point)
       mapRef.current?.setView([point.lat, point.lon], 21, { animate: false });
@@ -740,7 +744,9 @@ export function SelectedStationMap({
     );
   };
   const focusPlatformLength = (edge: PlatformEdge) => {
+    reviewKeyRef.current = null;
     setReviewKey(null);
+    setLearningMessage(null);
     setImagery(officialImageryStatus === 'active' ? 'official' : 'satellite');
     if (!edge.geometry.length) return;
     mapRef.current?.fitBounds(
@@ -859,6 +865,7 @@ export function SelectedStationMap({
   const approvePrimaryPoint = async () => {
     if (!pendingPrimaryPoint) return;
     const pending = pendingPrimaryPoint;
+    const pendingReviewKey = `${pending.edgeId}:${pending.endpoint}`;
     const edge = platformEdges.find((item) => item.id === pending.edgeId);
     if (!edge) return;
     const analysis = aerialResults[pending.edgeId];
@@ -892,13 +899,15 @@ export function SelectedStationMap({
         [pending.edgeId]: edge.geometry,
       }));
       setPendingPrimaryPoint(null);
-      setLearningMessage(
-        `Freigegeben: Gleis ${pending.track} ${pending.endpoint === 'start' ? 'Anfang' : 'Ende'} ist als Primärpunkt in Railway gespeichert.`,
-      );
+      if (reviewKeyRef.current === pendingReviewKey)
+        setLearningMessage(
+          `Freigegeben: Gleis ${pending.track} ${pending.endpoint === 'start' ? 'Anfang' : 'Ende'} ist als Primärpunkt in Railway gespeichert.`,
+        );
     } catch {
-      setLearningMessage(
-        'Speicherung in Railway fehlgeschlagen – der Punkt bleibt ein unbestätigter Entwurf.',
-      );
+      if (reviewKeyRef.current === pendingReviewKey)
+        setLearningMessage(
+          'Speicherung in Railway fehlgeschlagen – der Punkt bleibt ein unbestätigter Entwurf.',
+        );
     }
   };
   useEffect(() => {
