@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 PRELOAD_CONCURRENCY = 2
 PRELOAD_BATCH_PAUSE_SECONDS = 5
+PRELOAD_ENDPOINT_ATTEMPTS = 2
 
 
 def next_stations(limit=PRELOAD_CONCURRENCY):
@@ -67,21 +68,25 @@ async def run_osm_preload():
                     await asyncio.sleep(60)
                     continue
 
-                async def import_station(station, endpoint):
+                async def import_station(station, start_endpoint_index):
                     ril,latitude,longitude=station
-                    try:
-                        elements=await fetch_geometry(
-                            client,endpoint,latitude,longitude)
-                        store_result(ril,elements=elements)
-                        del elements
-                    except (httpx.HTTPError,ValueError) as error:
-                        store_result(ril,error=f'{type(error).__name__}: {error}')
+                    errors=[]
+                    for attempt in range(PRELOAD_ENDPOINT_ATTEMPTS):
+                        endpoint=OVERPASS_ENDPOINTS[
+                            (start_endpoint_index+attempt) % len(OVERPASS_ENDPOINTS)]
+                        try:
+                            elements=await fetch_geometry(
+                                client,endpoint,latitude,longitude)
+                            store_result(ril,elements=elements)
+                            del elements
+                            return
+                        except (httpx.HTTPError,ValueError) as error:
+                            errors.append(f'{type(error).__name__}: {error}')
+                    store_result(ril,error=' | '.join(errors))
 
                 jobs=[]
                 for offset,station in enumerate(stations):
-                    endpoint=OVERPASS_ENDPOINTS[
-                        (endpoint_index+offset) % len(OVERPASS_ENDPOINTS)]
-                    jobs.append(import_station(station,endpoint))
+                    jobs.append(import_station(station,endpoint_index+offset))
                 endpoint_index+=len(stations)
                 await asyncio.gather(*jobs)
                 await asyncio.sleep(PRELOAD_BATCH_PAUSE_SECONDS)
