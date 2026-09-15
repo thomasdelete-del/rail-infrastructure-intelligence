@@ -55,6 +55,9 @@ export type Station = {
   name: string;
   latitude: number;
   longitude: number;
+  ril?: string | null;
+  eva?: string | null;
+  stationNumber?: string | null;
   available?: boolean;
 };
 type StaDaStation = {
@@ -493,6 +496,9 @@ export function SelectedStationMap({
   const [authoritativePlatforms, setAuthoritativePlatforms] = useState<
     AuthoritativePlatform[]
   >([]);
+  const [dbEquipmentPlatforms, setDbEquipmentPlatforms] = useState<
+    AuthoritativePlatform[]
+  >([]);
   const [isrIdentifierMatch, setIsrIdentifierMatch] = useState<{
     requested: string;
     matched: string;
@@ -927,44 +933,31 @@ export function SelectedStationMap({
     }
   };
   useEffect(() => {
-    const stationNumber = station.id.match(/^stada-(\d+)$/)?.[1];
-    if (!stationNumber) return;
+    if (!station.ril) return;
     const controller = new AbortController();
-    void fetch(
-      `${API}/stations/materialized-identity?${new URLSearchParams({ station_number: stationNumber })}`,
-      { cache: 'no-store', signal: controller.signal },
-    )
-      .then((response) =>
-        response.ok ? response.json() : Promise.reject(new Error()),
-      )
-      .then(async (raw: unknown) => {
-        const value = raw as {
-          matched_name?: string;
-          eva?: string;
-          ril?: string;
-          station_number?: string;
-        };
-        setIdentity({
-          name: value.matched_name,
-          eva: value.eva,
-          ril: value.ril,
-          stationNumber: value.station_number,
-        });
-        setDbSources((current) => ({ ...current, stada: current.stada === 'active' ? 'active' : 'cached' }));
-        if (!value.ril) return;
-        const response = await fetch(
-          `${API}/matching/stations/fetch?${new URLSearchParams({ rl100: value.ril })}`,
-          { cache: 'no-store', signal: controller.signal },
-        );
-        if (!response.ok) return;
-        const matching = (await response.json()) as MatchingPayload;
-        const platforms = mergeMatchingPlatforms([], matching);
+    setIdentity({ name: station.name, eva: station.eva ?? undefined,
+      ril: station.ril, stationNumber: station.stationNumber ?? undefined });
+    const matchingUrl = `${API}/matching/stations/fetch?${new URLSearchParams({ rl100: station.ril })}`;
+    const platformUrl = `${API}/stations/platform-data?${new URLSearchParams({ name: station.name, ril: station.ril })}`;
+    void Promise.all([
+      fetch(matchingUrl, { cache: 'no-store', signal: controller.signal }),
+      fetch(platformUrl, { cache: 'no-store', signal: controller.signal }),
+    ]).then(async ([matchingResponse, platformResponse]) => {
+        if (!matchingResponse.ok) return;
+        const matching = (await matchingResponse.json()) as MatchingPayload;
+        const platformData = platformResponse.ok
+          ? await platformResponse.json() as { platforms: AuthoritativePlatform[]; status?: { db_infrago?: string } }
+          : { platforms: [], status: {} };
+        setDbEquipmentPlatforms(platformData.platforms);
+        const platforms = mergeMatchingPlatforms(platformData.platforms, matching);
         setIsrIdentifierMatch(matching.identifier_match ?? null);
         setAuthoritativePlatforms(platforms);
         setPlatformDataLoading(false);
         setDbSources((current) => ({
           ...current,
-          netex: platforms.some((item) => item.net_construction_length_m != null) ? 'cached' : current.netex,
+          stada: current.stada === 'active' ? 'active' : 'cached',
+          netex: 'cached',
+          fasta: platformData.status?.db_infrago ?? 'cached',
           rinf: platforms.some((item) => item.rinf_platform_id) ? 'cached' : current.rinf,
         }));
         localStorage.setItem(
@@ -997,6 +990,7 @@ export function SelectedStationMap({
     if (localPlatformSnapshot?.sourceModel !== 'isr-height-v1')
       localPlatformSnapshot = undefined;
     setAuthoritativePlatforms(localPlatformSnapshot?.platforms ?? []);
+    setDbEquipmentPlatforms([]);
     if (localPlatformSnapshot?.platforms.length) {
       setDbSources({
         stada: station.id.startsWith('stada-') ? 'cached' : undefined,
@@ -1069,7 +1063,7 @@ export function SelectedStationMap({
           rinf: fetchedAt,
           fasta: fetchedAt,
         }));
-        if (value.ril) {
+        if (value.ril && !station.ril) {
           const platformParameters = new URLSearchParams({
             name: value.matched_name || station.name,
             ril: value.ril,
@@ -1718,7 +1712,14 @@ export function SelectedStationMap({
           ? platformEdges.find((candidate) => !hasTrackNumber(candidate.track))
           : undefined);
       if (edge) matched.add(edge.id);
-      return { track: data.track, edge, data, matchedViaNetex };
+      const bridgedDb = bridgedTrack
+        ? dbEquipmentPlatforms.find((platform) => normalizeTrackRef(platform.track) === bridgedTrack)
+        : undefined;
+      const mergedData = bridgedDb ? {
+        ...data,
+        net_construction_length_m: data.net_construction_length_m ?? bridgedDb.net_construction_length_m,
+      } : data;
+      return { track: data.track, edge, data: mergedData, matchedViaNetex };
     });
     // DB InfraGO/ISR defines the platform inventory. OSM only supplies geometry
     // for a matching track and must not create additional authoritative rows.
@@ -1731,7 +1732,7 @@ export function SelectedStationMap({
     return rows.sort((a, b) =>
       a.track.localeCompare(b.track, 'de', { numeric: true }),
     );
-  }, [authoritativePlatforms, inventory, platformEdges]);
+  }, [authoritativePlatforms, dbEquipmentPlatforms, inventory, platformEdges]);
   const lengthComparison = (
     edge?: PlatformEdge,
     data?: AuthoritativePlatform,
@@ -4060,6 +4061,9 @@ export function GermanyStationMap({
                   name: candidate.name,
                   latitude,
                   longitude,
+                  ril: candidate.ril,
+                  eva: candidate.eva,
+                  stationNumber: String(candidate.station_number),
                 },
               ]
             : [];
@@ -4159,6 +4163,9 @@ export function GermanyStationMap({
       name: candidate.name,
       latitude,
       longitude,
+      ril: candidate.ril,
+      eva: candidate.eva,
+      stationNumber: String(candidate.station_number),
     };
     setShowResults(false);
     map.current?.setView([latitude, longitude], 16, { animate: true });
