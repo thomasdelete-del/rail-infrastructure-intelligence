@@ -1466,11 +1466,20 @@ export function SelectedStationMap({
               const refreshed = (await response.json()) as {
                 elements?: OsmElement[];
               };
-              if (refreshed.elements?.length)
+              if (refreshed.elements?.length) {
+                const refreshedJson = JSON.stringify(refreshed.elements);
+                const cacheKey = `station-osm-reference:${station.id}`;
+                const cacheChanged = localStorage.getItem(cacheKey) !== refreshedJson;
                 localStorage.setItem(
-                  `station-osm-reference:${station.id}`,
-                  JSON.stringify(refreshed.elements),
+                  cacheKey,
+                  refreshedJson,
                 );
+                // A cached response is rendered immediately. If Railway returns
+                // newer OSM tags/geometries, rebuild the station view once so the
+                // visible table does not remain stuck on the stale local copy.
+                if (cacheChanged && !disposed)
+                  setRefreshNonce((current) => current + 1);
+              }
             })
             .catch(() => undefined);
         } else {
