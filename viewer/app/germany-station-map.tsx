@@ -126,6 +126,49 @@ type PlatformEdge = {
   length: number;
   height?: string;
 };
+type SupplementaryTrackEvidence = {
+  sourceLabel: string;
+  sourceUrl: string;
+  confidence: 'mittel' | 'hoch';
+  method: string;
+  trackOrderNorthToSouth: string[];
+  directions: Record<string, string>;
+};
+// OSM platform geometries without ref/local_ref may only be bridged when an
+// externally verified, station-specific ordering is available. This never
+// changes the OSM attribution; it only links the anonymous geometry to a DB row.
+const SUPPLEMENTARY_TRACK_EVIDENCE: Record<string, SupplementaryTrackEvidence> = {
+  UME: {
+    sourceLabel: 'Offizieller DB-Regelfahrplan',
+    sourceUrl: 'https://www.bahnhof.de/downloads/schedule/Regeltafel_4013.pdf',
+    confidence: 'mittel',
+    method: 'Fahrtrichtung und räumliche Lage der beiden Außenbahnsteige',
+    trackOrderNorthToSouth: ['1', '2'],
+    directions: {
+      '1': 'Richtung Sättelstädt / Eisenach',
+      '2': 'Richtung Fröttstädt / Gotha / Erfurt',
+    },
+  },
+};
+const meanLatitude = (edge: PlatformEdge) =>
+  edge.geometry.reduce((sum, point) => sum + point.lat, 0) /
+  Math.max(edge.geometry.length, 1);
+export const supplementaryAnonymousEdgeBridge = (
+  ril: string | null | undefined,
+  authoritativeTracks: string[],
+  edges: PlatformEdge[],
+): Record<string, PlatformEdge> => {
+  const evidence = ril ? SUPPLEMENTARY_TRACK_EVIDENCE[ril.toUpperCase()] : undefined;
+  if (!evidence || authoritativeTracks.length !== evidence.trackOrderNorthToSouth.length ||
+      edges.length !== evidence.trackOrderNorthToSouth.length ||
+      edges.some((edge) => edge.trackSource !== 'unknown') ||
+      new Set(edges.map((edge) => edge.id)).size !== edges.length) return {};
+  const normalizedAuthoritative = new Set(authoritativeTracks.map(normalizeTrackRef));
+  if (!evidence.trackOrderNorthToSouth.every((track) => normalizedAuthoritative.has(normalizeTrackRef(track))))
+    return {};
+  const orderedEdges = [...edges].sort((a, b) => meanLatitude(b) - meanLatitude(a));
+  return Object.fromEntries(evidence.trackOrderNorthToSouth.map((track, index) => [normalizeTrackRef(track), orderedEdges[index]]));
+};
 export const osmPlatformHeightMm = (height?: string): number | null => {
   if (!height) return null;
   const match = height.trim().replace(',', '.').match(/^(\d+(?:\.\d+)?)\s*(m|cm|mm)?$/i);
@@ -1728,26 +1771,38 @@ export function SelectedStationMap({
       platformEdges.map((edge) => edge.track),
       netexTracks,
     );
+    const supplementaryEvidence = SUPPLEMENTARY_TRACK_EVIDENCE[(identity?.ril ?? station.ril ?? '').toUpperCase()];
+    const supplementaryBridge = supplementaryAnonymousEdgeBridge(
+      identity?.ril ?? station.ril,
+      authoritativePlatforms.map((platform) => platform.track),
+      platformEdges,
+    );
     const rows: Array<{
       track: string;
       edge?: PlatformEdge;
       data?: AuthoritativePlatform;
       matchedViaNetex?: boolean;
+      matchedViaSupplementary?: SupplementaryTrackEvidence;
     }> = authoritativePlatforms.map((data) => {
       let candidates = platformEdges.filter((candidate) =>
         hasTrackNumber(candidate.track) && trackRefTokens(candidate.track).includes(normalizeTrackRef(data.track)));
       let matchedViaNetex = false;
+      let matchedViaSupplementary: SupplementaryTrackEvidence | undefined;
       const bridgedTrack = bridge[normalizeTrackRef(data.track)];
       if (candidates.length === 0 && bridgedTrack) {
         candidates = platformEdges.filter((candidate) =>
           trackRefTokens(candidate.track).includes(bridgedTrack));
         matchedViaNetex = candidates.length === 1;
       }
-      const edge =
+      let edge =
         (candidates.length === 1 ? candidates[0] : undefined) ??
         (candidates.length === 0 && authoritativePlatforms.length === 1 && platformEdges.length === 1
           ? platformEdges.find((candidate) => !hasTrackNumber(candidate.track))
           : undefined);
+      if (!edge) {
+        edge = supplementaryBridge[normalizeTrackRef(data.track)];
+        if (edge) matchedViaSupplementary = supplementaryEvidence;
+      }
       if (edge) matched.add(edge.id);
       const bridgedDb = bridgedTrack
         ? dbEquipmentPlatforms.find((platform) => normalizeTrackRef(platform.track) === bridgedTrack)
@@ -1756,7 +1811,7 @@ export function SelectedStationMap({
         ...data,
         net_construction_length_m: data.net_construction_length_m ?? bridgedDb.net_construction_length_m,
       } : data;
-      return { track: data.track, edge, data: mergedData, matchedViaNetex };
+      return { track: data.track, edge, data: mergedData, matchedViaNetex, matchedViaSupplementary };
     });
     // DB InfraGO/ISR defines the platform inventory. OSM only supplies geometry
     // for a matching track and must not create additional authoritative rows.
@@ -1769,7 +1824,7 @@ export function SelectedStationMap({
     return rows.sort((a, b) =>
       a.track.localeCompare(b.track, 'de', { numeric: true }),
     );
-  }, [authoritativePlatforms, dbEquipmentPlatforms, inventory, platformEdges]);
+  }, [authoritativePlatforms, dbEquipmentPlatforms, identity?.ril, inventory, platformEdges, station.ril]);
   const lengthComparison = (
     edge?: PlatformEdge,
     data?: AuthoritativePlatform,
@@ -3113,7 +3168,7 @@ export function SelectedStationMap({
                 </td>
               </tr>
             ) : null}
-            {platformRows.map(({ track, edge, data, matchedViaNetex }) => {
+            {platformRows.map(({ track, edge, data, matchedViaNetex, matchedViaSupplementary }) => {
               const start = edge?.geometry[0],
                 end = edge?.geometry.at(-1);
               const originalGeometry = edge
@@ -3214,6 +3269,15 @@ export function SelectedStationMap({
                       {matchedViaNetex ? (
                         <span style={{ color: '#08754f' }}>
                           ISR {track} → NeTEx/OSM {edge?.track}
+                        </span>
+                      ) : null}
+                      {matchedViaSupplementary ? (
+                        <span style={{ color: '#946200' }}>
+                          Abgeleitet · {matchedViaSupplementary.confidence}e Konfidenz ·{' '}
+                          {matchedViaSupplementary.directions[normalizeTrackRef(track)] ?? matchedViaSupplementary.method}{' '}
+                          · <a className="source-data-link" href={matchedViaSupplementary.sourceUrl}
+                            target="_blank" rel="noreferrer">{matchedViaSupplementary.sourceLabel}</a>
+                          {' '}· keine originale OSM-Gleisnummer
                         </span>
                       ) : null}
                     </div>
