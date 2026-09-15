@@ -331,24 +331,32 @@ const geometryLength = (geometry: Array<{ lat: number; lon: number }>) =>
     .slice(1)
     .reduce((sum, point, index) => sum + distance(geometry[index], point), 0);
 
-export const endpointCorridorDistance = (
+export const projectPointToGeometry = (
   geometry: Array<{ lat: number; lon: number }>,
-  endpoint: 'start' | 'end',
   candidate: { lat: number; lon: number },
-) => {
-  if (geometry.length < 2) return Number.POSITIVE_INFINITY;
-  const anchor = endpoint === 'start' ? geometry[0] : geometry.at(-1)!;
-  const neighbor = endpoint === 'start' ? geometry[1] : geometry.at(-2)!;
-  const latitudeScale = 110540;
-  const longitudeScale = 111320 * Math.cos((anchor.lat * Math.PI) / 180);
-  const x = (neighbor.lon - anchor.lon) * longitudeScale;
-  const y = (neighbor.lat - anchor.lat) * latitudeScale;
-  const candidateX = (candidate.lon - anchor.lon) * longitudeScale;
-  const candidateY = (candidate.lat - anchor.lat) * latitudeScale;
-  const lineLength = Math.hypot(x, y);
-  return lineLength > 0
-    ? Math.abs(x * candidateY - y * candidateX) / lineLength
-    : Number.POSITIVE_INFINITY;
+): { point: { lat: number; lon: number }; segmentIndex: number; fraction: number; distance: number } | null => {
+  let best: { point: { lat: number; lon: number }; segmentIndex: number; fraction: number; distance: number } | null = null;
+  for (let segmentIndex = 0; segmentIndex < geometry.length - 1; segmentIndex++) {
+    const start = geometry[segmentIndex];
+    const end = geometry[segmentIndex + 1];
+    const longitudeScale = Math.cos((candidate.lat * Math.PI) / 180);
+    const x = (end.lon - start.lon) * longitudeScale;
+    const y = end.lat - start.lat;
+    const candidateX = (candidate.lon - start.lon) * longitudeScale;
+    const candidateY = candidate.lat - start.lat;
+    const squared = x * x + y * y;
+    const fraction = squared
+      ? Math.max(0, Math.min(1, (candidateX * x + candidateY * y) / squared))
+      : 0;
+    const point = {
+      lat: start.lat + (end.lat - start.lat) * fraction,
+      lon: start.lon + (end.lon - start.lon) * fraction,
+    };
+    const projectedDistance = distance(candidate, point);
+    if (!best || projectedDistance < best.distance)
+      best = { point, segmentIndex, fraction, distance: projectedDistance };
+  }
+  return best;
 };
 
 export const platformLongAxis = (
@@ -825,15 +833,15 @@ export function SelectedStationMap({
         (edge) => edge.id === target.edgeId,
       );
       if (!targetEdge) return;
-      const corridorDistance = endpointCorridorDistance(
-        targetEdge.geometry,target.endpoint,requestedCoordinate);
-      if (corridorDistance > 4) {
+      const projection = projectPointToGeometry(
+        targetEdge.geometry,requestedCoordinate);
+      if (!projection || projection.distance > 4) {
         setCorrectionError(
-          `Der gewählte Punkt liegt ${corridorDistance.toFixed(1)} m seitlich außerhalb des zulässigen Korridors.`,
+          `Der gewählte Punkt liegt ${projection ? projection.distance.toFixed(1) : 'zu weit'} m von der Bahnsteigkante entfernt.`,
         );
         return;
       }
-      const coordinate = requestedCoordinate;
+      const coordinate = projection.point;
       const key = `${target.edgeId}:${target.endpoint}`;
       setPendingPrimaryPoint({
         ...target,
@@ -845,9 +853,10 @@ export function SelectedStationMap({
       setPlatformEdges((current) =>
         current.map((edge) => {
           if (edge.id !== target.edgeId) return edge;
-          const geometry = [...edge.geometry];
-          if (target.endpoint === 'start') geometry[0] = coordinate;
-          else geometry[geometry.length - 1] = coordinate;
+          const geometry = target.endpoint === 'start'
+            ? [coordinate, ...edge.geometry.slice(projection.segmentIndex + 1)]
+            : [...edge.geometry.slice(0, projection.segmentIndex + 1), coordinate];
+          if (geometry.length < 2) return edge;
           return { ...edge, geometry, length: geometryLength(geometry) };
         }),
       );
@@ -2148,28 +2157,34 @@ export function SelectedStationMap({
       lat: currentAerial.candidate_end.latitude,
       lon: currentAerial.candidate_end.longitude,
     };
-    const startDistance = endpointCorridorDistance(
-      currentReview.edge.geometry,'start',start);
-    const endDistance = endpointCorridorDistance(
-      currentReview.edge.geometry,'end',end);
-    if (startDistance > 4 || endDistance > 4) {
+    const startProjection = projectPointToGeometry(currentReview.edge.geometry,start);
+    const endProjection = projectPointToGeometry(currentReview.edge.geometry,end);
+    const startPosition = startProjection ? startProjection.segmentIndex + startProjection.fraction : Infinity;
+    const endPosition = endProjection ? endProjection.segmentIndex + endProjection.fraction : -Infinity;
+    if (!startProjection || !endProjection || startProjection.distance > 4 ||
+        endProjection.distance > 4 || startPosition >= endPosition) {
       setCorrectionError(
-        `Luftbildvorschlag verworfen: mindestens ein Punkt liegt ${Math.max(startDistance, endDistance).toFixed(1)} m seitlich außerhalb des zulässigen Korridors.`,
+        'Luftbildvorschlag verworfen: Die Endpunkte lassen sich nicht eindeutig in richtiger Reihenfolge mit der Bahnsteigkante verbinden.',
       );
       setLearningMessage('Der Luftbildvorschlag ist nicht plausibel und wird nicht gespeichert.');
       return;
     }
+    const connectedGeometry = [
+      startProjection.point,
+      ...currentReview.edge.geometry.slice(startProjection.segmentIndex + 1, endProjection.segmentIndex + 1),
+      endProjection.point,
+    ];
     setCorrectedGeometries((drafts) => ({
       ...drafts,
-      [currentReview.edge.id]: [start, end],
+      [currentReview.edge.id]: connectedGeometry,
     }));
     setPlatformEdges((current) =>
       current.map((edge) =>
         edge.id === currentReview.edge.id
           ? {
               ...edge,
-              geometry: [start, end],
-              length: geometryLength([start, end]),
+              geometry: connectedGeometry,
+              length: geometryLength(connectedGeometry),
             }
           : edge,
       ),
