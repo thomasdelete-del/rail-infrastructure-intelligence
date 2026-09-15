@@ -79,6 +79,22 @@ const normalizeTrackRef = (value: string) =>
 const hasTrackNumber = (value: string) => /\d/.test(value);
 export const trackRefTokens = (value: string) => value.split(/[;,\/]/)
   .map((token) => normalizeTrackRef(token.trim())).filter(Boolean);
+export const netexTrackBridge = (
+  authoritativeTracks: string[], osmTracks: string[], netexTracks: string[],
+): Record<string, string> => {
+  const numeric = (values: string[]) => [...new Set(values.map(normalizeTrackRef))]
+    .filter((value) => /^\d+$/.test(value)).sort((a, b) => Number(a) - Number(b));
+  const authoritative = numeric(authoritativeTracks);
+  const osm = numeric(osmTracks);
+  const netex = numeric(netexTracks);
+  if (authoritative.length < 2 || authoritative.length !== authoritativeTracks.length ||
+      osm.length !== osmTracks.length || netex.length !== netexTracks.length ||
+      authoritative.length !== osm.length || osm.length !== netex.length ||
+      osm.some((value, index) => value !== netex[index])) return {};
+  const offset = Number(authoritative[0]) - Number(netex[0]);
+  if (!authoritative.every((value, index) => Number(value) - Number(netex[index]) === offset)) return {};
+  return Object.fromEntries(authoritative.map((value, index) => [value, osm[index]]));
+};
 const escapeHtml = (value: string) =>
   value.replace(
     /[&<>"']/g,
@@ -1671,20 +1687,38 @@ export function SelectedStationMap({
   }, [imagery, imageryOpacity]);
   const platformRows = useMemo(() => {
     const matched = new Set<string>();
+    const netexTracks = inventory?.objects
+      .filter((object) => object.object_type === 'platform_edge')
+      .flatMap((object) => object.observations
+        .filter((observation) => observation.attribute === 'name' || observation.attribute === 'public_code')
+        .map((observation) => String(observation.value))) ?? [];
+    const bridge = netexTrackBridge(
+      authoritativePlatforms.map((platform) => platform.track),
+      platformEdges.map((edge) => edge.track),
+      netexTracks,
+    );
     const rows: Array<{
       track: string;
       edge?: PlatformEdge;
       data?: AuthoritativePlatform;
+      matchedViaNetex?: boolean;
     }> = authoritativePlatforms.map((data) => {
-      const candidates = platformEdges.filter((candidate) =>
+      let candidates = platformEdges.filter((candidate) =>
         hasTrackNumber(candidate.track) && trackRefTokens(candidate.track).includes(normalizeTrackRef(data.track)));
+      let matchedViaNetex = false;
+      const bridgedTrack = bridge[normalizeTrackRef(data.track)];
+      if (candidates.length === 0 && bridgedTrack) {
+        candidates = platformEdges.filter((candidate) =>
+          trackRefTokens(candidate.track).includes(bridgedTrack));
+        matchedViaNetex = candidates.length === 1;
+      }
       const edge =
         (candidates.length === 1 ? candidates[0] : undefined) ??
         (candidates.length === 0 && authoritativePlatforms.length === 1 && platformEdges.length === 1
           ? platformEdges.find((candidate) => !hasTrackNumber(candidate.track))
           : undefined);
       if (edge) matched.add(edge.id);
-      return { track: data.track, edge, data };
+      return { track: data.track, edge, data, matchedViaNetex };
     });
     // DB InfraGO/ISR defines the platform inventory. OSM only supplies geometry
     // for a matching track and must not create additional authoritative rows.
@@ -1697,7 +1731,7 @@ export function SelectedStationMap({
     return rows.sort((a, b) =>
       a.track.localeCompare(b.track, 'de', { numeric: true }),
     );
-  }, [authoritativePlatforms, platformEdges]);
+  }, [authoritativePlatforms, inventory, platformEdges]);
   const lengthComparison = (
     edge?: PlatformEdge,
     data?: AuthoritativePlatform,
@@ -3024,7 +3058,7 @@ export function SelectedStationMap({
                 </td>
               </tr>
             ) : null}
-            {platformRows.map(({ track, edge, data }) => {
+            {platformRows.map(({ track, edge, data, matchedViaNetex }) => {
               const start = edge?.geometry[0],
                 end = edge?.geometry.at(-1);
               const originalGeometry = edge
@@ -3112,7 +3146,7 @@ export function SelectedStationMap({
                       )}
                       {edge?.trackSource === 'ref' ? (
                         <span>
-                          OSM ref={track} ·{' '}
+                          OSM ref={edge.track} ·{' '}
                           {edge.osmType === 'way' ? 'Weg' : 'Knoten'}{' '}
                           {edge.osmId}
                         </span>
@@ -3121,6 +3155,11 @@ export function SelectedStationMap({
                       ) : null}
                       {edge && trackRefTokens(edge.track).length > 1 ? (
                         <span style={{ color: '#946200' }}>Gemeinsame Bahnsteigfläche · Kantenseite nicht bestätigt</span>
+                      ) : null}
+                      {matchedViaNetex ? (
+                        <span style={{ color: '#08754f' }}>
+                          ISR {track} → NeTEx/OSM {edge?.track}
+                        </span>
                       ) : null}
                     </div>
                   </td>
