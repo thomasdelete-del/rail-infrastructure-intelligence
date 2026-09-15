@@ -331,6 +331,26 @@ const geometryLength = (geometry: Array<{ lat: number; lon: number }>) =>
     .slice(1)
     .reduce((sum, point, index) => sum + distance(geometry[index], point), 0);
 
+export const endpointCorridorDistance = (
+  geometry: Array<{ lat: number; lon: number }>,
+  endpoint: 'start' | 'end',
+  candidate: { lat: number; lon: number },
+) => {
+  if (geometry.length < 2) return Number.POSITIVE_INFINITY;
+  const anchor = endpoint === 'start' ? geometry[0] : geometry.at(-1)!;
+  const neighbor = endpoint === 'start' ? geometry[1] : geometry.at(-2)!;
+  const latitudeScale = 110540;
+  const longitudeScale = 111320 * Math.cos((anchor.lat * Math.PI) / 180);
+  const x = (neighbor.lon - anchor.lon) * longitudeScale;
+  const y = (neighbor.lat - anchor.lat) * latitudeScale;
+  const candidateX = (candidate.lon - anchor.lon) * longitudeScale;
+  const candidateY = (candidate.lat - anchor.lat) * latitudeScale;
+  const lineLength = Math.hypot(x, y);
+  return lineLength > 0
+    ? Math.abs(x * candidateY - y * candidateX) / lineLength
+    : Number.POSITIVE_INFINITY;
+};
+
 export const platformLongAxis = (
   geometry: Array<{ lat: number; lon: number }>,
   rails: Array<Array<{ lat: number; lon: number }>> = [],
@@ -805,6 +825,14 @@ export function SelectedStationMap({
         (edge) => edge.id === target.edgeId,
       );
       if (!targetEdge) return;
+      const corridorDistance = endpointCorridorDistance(
+        targetEdge.geometry,target.endpoint,requestedCoordinate);
+      if (corridorDistance > 4) {
+        setCorrectionError(
+          `Der gewählte Punkt liegt ${corridorDistance.toFixed(1)} m seitlich außerhalb des zulässigen Korridors.`,
+        );
+        return;
+      }
       const coordinate = requestedCoordinate;
       const key = `${target.edgeId}:${target.endpoint}`;
       setPendingPrimaryPoint({
@@ -2120,6 +2148,17 @@ export function SelectedStationMap({
       lat: currentAerial.candidate_end.latitude,
       lon: currentAerial.candidate_end.longitude,
     };
+    const startDistance = endpointCorridorDistance(
+      currentReview.edge.geometry,'start',start);
+    const endDistance = endpointCorridorDistance(
+      currentReview.edge.geometry,'end',end);
+    if (startDistance > 4 || endDistance > 4) {
+      setCorrectionError(
+        `Luftbildvorschlag verworfen: mindestens ein Punkt liegt ${Math.max(startDistance, endDistance).toFixed(1)} m seitlich außerhalb des zulässigen Korridors.`,
+      );
+      setLearningMessage('Der Luftbildvorschlag ist nicht plausibel und wird nicht gespeichert.');
+      return;
+    }
     setCorrectedGeometries((drafts) => ({
       ...drafts,
       [currentReview.edge.id]: [start, end],
